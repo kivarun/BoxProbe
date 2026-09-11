@@ -103,9 +103,6 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
   implementation(libs.androidx.exifinterface)
-  // Agent chat: SAF directory access via DocumentFile (was transitive via Firebase before).
-  implementation(libs.androidx.documentfile)
-  implementation(libs.moshi.kotlin)
 
   // Box: Biometric authentication (StrongBox)
   implementation(libs.androidx.biometric)
@@ -133,7 +130,6 @@ dependencies {
   androidTestImplementation(libs.hilt.android.testing)
   debugImplementation(libs.androidx.ui.tooling)
   debugImplementation(libs.androidx.ui.test.manifest)
-  ksp(libs.moshi.kotlin.codegen)
   implementation(libs.mlkit.genai.prompt)
 }
 

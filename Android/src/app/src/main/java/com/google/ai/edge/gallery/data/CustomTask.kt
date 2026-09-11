@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.google.ai.edge.gallery.customtasks.common
+package com.google.ai.edge.gallery.data
 
 import android.content.Context
 import androidx.compose.runtime.Composable
@@ -52,10 +52,9 @@ import kotlinx.coroutines.CoroutineScope
  *    implementation into a set of `CustomTask`s. This makes your task automatically discoverable by
  *    the app's home screen.
  *
- * For a concrete example of how to implement these steps, see the
- * [com.google.ai.edge.gallery.customtasks.examplecustomtask.ExampleCustomTask] class. This example
- * implements a "Model Viewer" task that displays the text content of a model file for demonstration
- * purpose. See comments there for more details.
+ * For a concrete example of how to implement these steps, see the built-in LLM chat task module
+ * (`ui/llmchat/LlmChatTaskModule.kt`), which registers an LLM chat task into the set of
+ * `CustomTask`s.
  *
  */
 interface CustomTask {

@@ -211,9 +211,6 @@ fun ModelPageAppBar(
     // This may happen when user imports a model with "enable tiny garden" turned on and use the
     // model in another non-tiny-garden task.
     val modelConfigs = model.configs.toMutableList()
-    if (task.id != BuiltInTaskId.LLM_TINY_GARDEN) {
-      modelConfigs.removeIf { it.key == ConfigKeys.RESET_CONVERSATION_TURN_COUNT }
-    }
     if (!task.allowThinking()) {
       modelConfigs.removeIf { it.key == ConfigKeys.ENABLE_THINKING }
     }

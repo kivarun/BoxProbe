@@ -64,7 +64,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.data.BuiltInTaskId
-import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
@@ -100,7 +99,6 @@ fun ChatView(
   onResetSessionClicked: (Model) -> Unit = {},
   onStreamImageMessage: (Model, ChatMessageImage) -> Unit = { _, _ -> },
   onStopButtonClicked: (Model) -> Unit = {},
-  onSkillClicked: () -> Unit = {},
   showStopButtonInInputWhenInProgress: Boolean = false,
   composableBelowMessageList: @Composable (Model) -> Unit = {},
   showImagePicker: Boolean = false,
@@ -229,10 +227,6 @@ fun ChatView(
           // - The "reset conversation turn count" is only valid for tiny garden task.
           val filteredOld = old.toMutableMap()
           val filteredNew = new.toMutableMap()
-          if (task.id != BuiltInTaskId.LLM_TINY_GARDEN) {
-            filteredOld.remove(ConfigKeys.RESET_CONVERSATION_TURN_COUNT.label)
-            filteredNew.remove(ConfigKeys.RESET_CONVERSATION_TURN_COUNT.label)
-          }
           viewModel.addConfigChangedMessage(
             oldConfigValues = filteredOld,
             newConfigValues = filteredNew,
@@ -290,7 +284,6 @@ fun ChatView(
                   allImageViewerImages = bitmaps
                   showImageViewer = true
                 },
-                onSkillClicked = onSkillClicked,
                 modifier = Modifier.weight(1f),
                 showStopButtonInInputWhenInProgress = showStopButtonInInputWhenInProgress,
                 showImagePicker = showImagePicker,

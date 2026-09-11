@@ -58,7 +58,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -69,16 +68,12 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.google.ai.edge.gallery.customtasks.common.CustomTaskData
-import com.google.ai.edge.gallery.customtasks.common.CustomTaskDataForBuiltinTask
+import com.google.ai.edge.gallery.data.CustomTaskDataForBuiltinTask
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.data.isLegacyTasks
 import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
-import com.google.ai.edge.gallery.ui.common.ErrorDialog
-import com.google.ai.edge.gallery.ui.common.ModelPageAppBar
-import com.google.ai.edge.gallery.ui.common.chat.ModelDownloadStatusInfoPanel
 import com.google.ai.edge.gallery.ui.home.HomeScreen
 import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
@@ -302,51 +297,6 @@ fun GalleryNavHost(
                   autoResumeConversation = autoResume,
                 )
             )
-          } else {
-            var disableAppBarControls by remember { mutableStateOf(false) }
-            var hideTopBar by remember { mutableStateOf(false) }
-            var customNavigateUpCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
-            CustomTaskScreen(
-              task = customTask.task,
-              modelManagerViewModel = modelManagerViewModel,
-              onNavigateUp = {
-                if (customNavigateUpCallback != null) {
-                  customNavigateUpCallback?.invoke()
-                } else {
-                  enableModelListAnimation = false
-                  lastNavigatedModelName = ""
-                  navController.navigateUp()
-
-                  // clean up all models.
-                  for (curModel in customTask.task.models) {
-                    val instanceToCleanUp = curModel.instance
-                    scope.launch(Dispatchers.Default) {
-                      modelManagerViewModel.cleanupModel(
-                        context = context,
-                        task = customTask.task,
-                        model = curModel,
-                        instanceToCleanUp = instanceToCleanUp,
-                      )
-                    }
-                  }
-                }
-              },
-              disableAppBarControls = disableAppBarControls,
-              hideTopBar = hideTopBar,
-              useThemeColor = customTask.task.useThemeColor,
-            ) { bottomPadding ->
-              customTask.MainScreen(
-                data =
-                  CustomTaskData(
-                    modelManagerViewModel = modelManagerViewModel,
-                    bottomPadding = bottomPadding,
-                    setAppBarControlsDisabled = { disableAppBarControls = it },
-                    setTopBarVisible = { hideTopBar = !it },
-                    conversationId = conversationId,
-                    setCustomNavigateUpCallback = { customNavigateUpCallback = it },
-                  )
-              )
-            }
           }
         }
       }
@@ -456,144 +406,3 @@ fun GalleryNavHost(
   }
 }
 
-@Composable
-private fun CustomTaskScreen(
-  task: Task,
-  modelManagerViewModel: ModelManagerViewModel,
-  disableAppBarControls: Boolean,
-  hideTopBar: Boolean,
-  useThemeColor: Boolean,
-  onNavigateUp: () -> Unit,
-  content: @Composable (bottomPadding: Dp) -> Unit,
-) {
-  val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
-  val selectedModel = modelManagerUiState.selectedModel
-  val scope = rememberCoroutineScope()
-  val context = LocalContext.current
-  var navigatingUp by remember { mutableStateOf(false) }
-  var showErrorDialog by remember { mutableStateOf(false) }
-  var appBarHeight by remember { mutableIntStateOf(0) }
-
-  val handleNavigateUp = {
-    navigatingUp = true
-    onNavigateUp()
-  }
-
-  // Handle system's edge swipe.
-  BackHandler { handleNavigateUp() }
-
-  // Initialize model when model/download state changes.
-  val curDownloadStatus = modelManagerUiState.modelDownloadStatus[selectedModel.name]
-  LaunchedEffect(curDownloadStatus, selectedModel.name) {
-    if (!navigatingUp) {
-      if (curDownloadStatus?.status == ModelDownloadStatusType.SUCCEEDED) {
-        Log.d(
-          TAG,
-          "Initializing model '${selectedModel.name}' from CustomTaskScreen launched effect",
-        )
-        modelManagerViewModel.initializeModel(context, task = task, model = selectedModel)
-      }
-    }
-  }
-
-  val modelInitializationStatus = modelManagerUiState.modelInitializationStatus[selectedModel.name]
-  LaunchedEffect(modelInitializationStatus) {
-    showErrorDialog = modelInitializationStatus?.status == ModelInitializationStatusType.ERROR
-  }
-
-  Scaffold(
-    topBar = {
-      AnimatedVisibility(
-        !hideTopBar,
-        enter = slideInVertically { -it },
-        exit = slideOutVertically { -it },
-      ) {
-        ModelPageAppBar(
-          task = task,
-          model = selectedModel,
-          modelManagerViewModel = modelManagerViewModel,
-          inProgress = disableAppBarControls,
-          modelPreparing = disableAppBarControls,
-          canShowResetSessionButton = false,
-          useThemeColor = useThemeColor,
-          modifier =
-            Modifier.onGloballyPositioned { coordinates -> appBarHeight = coordinates.size.height },
-          hideModelSelector = task.models.size <= 1,
-          onConfigChanged = { _, _ -> },
-          onBackClicked = { handleNavigateUp() },
-          onModelSelected = { prevModel, newSelectedModel ->
-            val instanceToCleanUp = prevModel.instance
-            scope.launch(Dispatchers.Default) {
-              // Clean up prev model.
-              if (prevModel.name != newSelectedModel.name) {
-                modelManagerViewModel.cleanupModel(
-                  context = context,
-                  task = task,
-                  model = prevModel,
-                  instanceToCleanUp = instanceToCleanUp,
-                )
-              }
-
-              // Update selected model.
-              Log.d(TAG, "from model picker. new: ${newSelectedModel.name}")
-              modelManagerViewModel.selectModel(model = newSelectedModel)
-            }
-          },
-        )
-      }
-    }
-  ) { innerPadding ->
-    // Calculate the target height in Dp for the content's top padding.
-    val targetPaddingDp =
-      if (!hideTopBar && appBarHeight > 0) {
-        // Convert measured pixel height to Dp
-        with(LocalDensity.current) { appBarHeight.toDp() }
-      } else {
-        WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-      }
-
-    // Animate the actual top padding value.
-    val animatedTopPadding by
-      animateDpAsState(
-        targetValue = targetPaddingDp,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "TopPaddingAnimation",
-      )
-
-    Box(
-      modifier =
-        Modifier.padding(
-          top = if (!hideTopBar) innerPadding.calculateTopPadding() else animatedTopPadding,
-          start = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-          end = innerPadding.calculateStartPadding(LocalLayoutDirection.current),
-        )
-    ) {
-      val curModelDownloadStatus = modelManagerUiState.modelDownloadStatus[selectedModel.name]
-      AnimatedContent(
-        targetState = curModelDownloadStatus?.status == ModelDownloadStatusType.SUCCEEDED
-      ) { targetState ->
-        when (targetState) {
-          // Main UI when model is downloaded.
-          true -> content(innerPadding.calculateBottomPadding())
-          // Model download
-          false ->
-            ModelDownloadStatusInfoPanel(
-              model = selectedModel,
-              task = task,
-              modelManagerViewModel = modelManagerViewModel,
-            )
-        }
-      }
-    }
-  }
-
-  if (showErrorDialog) {
-    ErrorDialog(
-      error = modelInitializationStatus?.error ?: "",
-      onDismiss = {
-        showErrorDialog = false
-        onNavigateUp()
-      },
-    )
-  }
-}

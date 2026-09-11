@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.google.ai.edge.gallery.customtasks.common
+package com.google.ai.edge.gallery.data
 
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
