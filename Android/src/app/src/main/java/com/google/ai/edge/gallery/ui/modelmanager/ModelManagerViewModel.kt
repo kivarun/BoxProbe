@@ -40,7 +40,6 @@ import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.DownloadRepository
 import com.google.ai.edge.gallery.data.EMPTY_MODEL
 import com.google.ai.edge.gallery.data.IMPORTS_DIR
-import com.google.ai.edge.gallery.data.SD_IMPORTS_DIR
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelAllowlist
 import com.google.ai.edge.gallery.data.ModelDownloadStatus
@@ -675,60 +674,6 @@ constructor(
     dataStoreRepository.saveImportedModels(importedModels = importedModels)
   }
 
-  fun addImportedSdModel(fileName: String, fileSize: Long) {
-    val model = createImportedSdModel(fileName = fileName, fileSize = fileSize)
-
-    val task = getTasksByIds(ids = setOf(BuiltInTaskId.IMAGE_GEN)).firstOrNull() ?: return
-    val existingIndex = task.models.indexOfFirst { it.name == model.name && it.imported }
-    if (existingIndex >= 0) task.models.removeAt(existingIndex)
-    task.models.add(model)
-    model.preProcess()
-    task.updateTrigger.value = System.currentTimeMillis()
-
-    val modelDownloadStatus = uiState.value.modelDownloadStatus.toMutableMap()
-    val modelInstances = uiState.value.modelInitializationStatus.toMutableMap()
-    modelDownloadStatus[model.name] = ModelDownloadStatus(
-      status = ModelDownloadStatusType.SUCCEEDED,
-      receivedBytes = fileSize,
-      totalBytes = fileSize,
-    )
-    modelInstances[model.name] =
-      ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
-
-    _uiState.update {
-      uiState.value.copy(
-        tasks = uiState.value.tasks.toList(),
-        modelDownloadStatus = modelDownloadStatus,
-        modelInitializationStatus = modelInstances,
-        modelImportingUpdateTrigger = System.currentTimeMillis(),
-      )
-    }
-  }
-
-  private fun createImportedSdModel(fileName: String, fileSize: Long): Model =
-    Model(
-      name = fileName,
-      info = "Imported SD GGUF model",
-      url = "",
-      sizeInBytes = fileSize,
-      downloadFileName = "$SD_IMPORTS_DIR/$fileName",
-      configs = mutableListOf(
-        NumberSliderConfig(
-          key = ConfigKey("sd_steps", "Steps"),
-          sliderMin = 1f, sliderMax = 50f, defaultValue = 20f,
-          valueType = ValueType.INT, needReinitialization = false,
-        ),
-        NumberSliderConfig(
-          key = ConfigKey("sd_cfg", "CFG Scale"),
-          sliderMin = 1f, sliderMax = 20f, defaultValue = 7.5f,
-          valueType = ValueType.FLOAT, needReinitialization = false,
-        ),
-      ),
-      showBenchmarkButton = false,
-      showRunAgainButton = false,
-      imported = true,
-    ).also { it.preProcess() }
-
   fun getTokenStatusAndData(): TokenStatusAndData {
     // Try to load token data from DataStore.
     var tokenStatus = TokenStatus.NOT_STORED
@@ -1009,8 +954,8 @@ constructor(
           for (taskType in allowedModel.taskTypes) {
             val task = curTasks.find { it.id == taskType }
             // Guard against duplicates when loadModelAllowlist() is called more than once
-            // (e.g. activity recreation). Tasks like WhisperTask/ImageGenTask pre-populate
-            // their models list in the constructor, so we must not clear it wholesale.
+            // (e.g. activity recreation). Tasks pre-populate their models list in the
+            // constructor, so we must not clear it wholesale.
             if (task != null && task.models.none { it.name == model.name }) {
               task.models.add(model)
             }
@@ -1201,22 +1146,6 @@ constructor(
           receivedBytes = importedModel.fileSize,
           totalBytes = importedModel.fileSize,
         )
-    }
-
-    // Load imported SD models by scanning the sd imports directory.
-    val sdImportsDir = File(externalFilesDir, SD_IMPORTS_DIR)
-    if (sdImportsDir.exists()) {
-      for (file in sdImportsDir.listFiles { _, name -> name.endsWith(".gguf") } ?: emptyArray()) {
-        val model = createImportedSdModel(fileName = file.name, fileSize = file.length())
-        tasks.get(key = BuiltInTaskId.IMAGE_GEN)?.models?.add(model)
-        modelDownloadStatus[model.name] = ModelDownloadStatus(
-          status = ModelDownloadStatusType.SUCCEEDED,
-          receivedBytes = file.length(),
-          totalBytes = file.length(),
-        )
-        modelInstances[model.name] =
-          ModelInitializationStatus(status = ModelInitializationStatusType.NOT_INITIALIZED)
-      }
     }
 
     val textInputHistory = dataStoreRepository.readTextInputHistory()

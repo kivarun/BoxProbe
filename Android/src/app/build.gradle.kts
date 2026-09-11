@@ -123,10 +123,6 @@ dependencies {
   // Box: llama.cpp native inference module for GGUF models
   implementation(project(":smollm"))
 
-  // Box: stable-diffusion.cpp native inference for image generation
-  implementation(project(":stablediffusion"))
-  implementation(project(":whisper"))
-
   // Box: Material 3 adaptive navigation
   implementation(libs.androidx.material3.adaptive.navigation.suite)
   implementation(libs.androidx.material3.window.size)

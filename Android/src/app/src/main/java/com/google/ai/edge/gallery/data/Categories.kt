@@ -42,6 +42,4 @@ object Category {
   val CLASSICAL_ML = CategoryInfo(id = "classical_ml", labelStringRes = R.string.category_llm)
   val EXPERIMENTAL =
     CategoryInfo(id = "experimental", labelStringRes = R.string.category_experimental)
-  val IMAGE_GEN = CategoryInfo(id = "image_gen", labelStringRes = R.string.category_image_gen)
-  val VOICE = CategoryInfo(id = "voice", labelStringRes = R.string.category_voice)
 }

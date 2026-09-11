@@ -51,5 +51,3 @@ rootProject.name = "AI Edge Gallery"
 
 include(":app")
 include(":smollm")
-include(":stablediffusion")
-include(":whisper")
