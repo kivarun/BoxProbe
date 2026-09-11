@@ -71,7 +71,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import com.google.ai.edge.gallery.GalleryEvent
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.AskInfoAgentAction
 import com.google.ai.edge.gallery.common.CallJsAgentAction
@@ -79,7 +78,6 @@ import com.google.ai.edge.gallery.common.SkillProgressAgentAction
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.firebaseAnalytics
 import com.google.ai.edge.gallery.ui.common.BaseGalleryWebViewClient
 import com.google.ai.edge.gallery.ui.common.GalleryWebView
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
@@ -416,13 +414,6 @@ fun AgentChatScreen(
                     messages =
                       listOf(ChatMessageText(content = promptChip.prompt, side = ChatSide.USER)),
                   )
-                firebaseAnalytics?.logEvent(
-                  GalleryEvent.BUTTON_CLICKED.id,
-                  Bundle().apply {
-                    putString("event_type", "agent_skills_prompt_chip")
-                    putString("button_id", promptChip.label)
-                  },
-                )
               } else {
                 disabledSkillName = promptChip.skillName
                 showAlertForDisabledSkill = true
