@@ -22,7 +22,6 @@ import androidx.lifecycle.ViewModel
 import com.google.ai.edge.gallery.common.processLlmResponse
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.local.ChatRepository
 import com.google.ai.edge.gallery.ui.common.chat.ChatSide
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,9 +52,6 @@ data class ChatUiState(
 abstract class ChatViewModel : ViewModel() {
   protected val _uiState = MutableStateFlow(createUiState())
   val uiState = _uiState.asStateFlow()
-  
-  // Subclasses should override this to provide the repository
-  protected abstract val chatRepository: ChatRepository
 
   fun addMessage(model: Model, message: ChatMessage) {
     val newMessagesByModel = _uiState.value.messagesByModel.toMutableMap()

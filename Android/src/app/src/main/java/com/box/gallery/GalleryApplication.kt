@@ -19,7 +19,6 @@ package com.box.gallery
 import android.app.Application
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.security.OfflineMode
-import com.google.ai.edge.gallery.security.SecurityAuditLog
 import com.google.ai.edge.gallery.ui.theme.ThemeSettings
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -37,7 +36,5 @@ class GalleryApplication : Application() {
 
     // Box: Initialize offline mode from saved preference
     OfflineMode.init(this)
-
-    SecurityAuditLog.log(this, "APPLICATION_CREATED")
   }
 }

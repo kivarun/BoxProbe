@@ -22,7 +22,6 @@ plugins {
   alias(libs.plugins.protobuf)
   alias(libs.plugins.hilt.application)
   alias(libs.plugins.oss.licenses)
-  alias(libs.plugins.ksp)
   kotlin("kapt")
 }
 
@@ -84,7 +83,6 @@ dependencies {
   implementation(libs.androidx.datastore)
   implementation(libs.com.google.code.gson)
   implementation(libs.androidx.lifecycle.process)
-  implementation(libs.androidx.security.crypto)
   implementation(libs.androidx.webkit)
   implementation(libs.litertlm)
   implementation(libs.commonmark)
@@ -103,16 +101,6 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
   implementation(libs.androidx.exifinterface)
-
-  // Box: Biometric authentication (StrongBox)
-  implementation(libs.androidx.biometric)
-
-  // Box: Encrypted Room database for chat persistence
-  implementation(libs.androidx.room.runtime)
-  implementation(libs.androidx.room.ktx)
-  ksp(libs.androidx.room.compiler)
-  implementation(libs.sqlcipher.android)
-  implementation(libs.sqlite)
 
   // Box: Material 3 adaptive navigation
   implementation(libs.androidx.material3.adaptive.navigation.suite)

@@ -118,47 +118,6 @@ fun ChatView(
 
   val context = LocalContext.current
 
-  // Load conversation history: use explicit conversationId if provided, else auto-resume
-  // the most recent conversation for this model (only when autoResumeConversation is true).
-  LaunchedEffect(conversationId, selectedModel.name) {
-    val llmViewModel = viewModel as? com.google.ai.edge.gallery.ui.llmchat.LlmChatViewModelBase
-      ?: return@LaunchedEffect
-    val existingMessages = llmViewModel.uiState.value.messagesByModel[selectedModel.name]
-    if (!existingMessages.isNullOrEmpty()) return@LaunchedEffect  // already loaded for this model
-
-    val convId = if (conversationId != null) {
-      conversationId
-    } else if (autoResumeConversation) {
-      llmViewModel.getLatestConversationForModel(selectedModel.name)?.id
-    } else {
-      null
-    }
-
-    if (convId != null) {
-      Log.d(TAG, "Loading conversation history for: $convId (model=${selectedModel.name})")
-      val messages = llmViewModel.loadConversationHistory(convId)
-      Log.d(TAG, "Loaded ${messages?.size ?: 0} messages")
-      messages?.forEach { message ->
-        llmViewModel.addMessage(
-          selectedModel,
-          ChatMessageText(
-            content = message.content,
-            side = if (message.role == "user") ChatSide.USER else ChatSide.AGENT,
-            latencyMs = message.latencyMs.toFloat(),
-          ),
-        )
-      }
-      llmViewModel.setCurrentConversationId(convId)
-      // Load the system prompt for this conversation so the config dialog shows it.
-      val conv = llmViewModel.getConversationById(convId)
-      if (conv?.systemPrompt?.isNotEmpty() == true) {
-        llmViewModel.setCurrentSystemPrompt(conv.systemPrompt)
-      }
-    } else {
-      Log.d(TAG, "No existing conversation for model ${selectedModel.name}, starting fresh")
-    }
-  }
-
   // Image viewer related.
   var selectedImageIndex by remember { mutableIntStateOf(-1) }
   var allImageViewerImages by remember { mutableStateOf<List<Bitmap>>(listOf()) }

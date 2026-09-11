@@ -168,7 +168,6 @@ fun HomeScreen(
   tosViewModel: TosViewModel,
   navigateToTaskScreen: (Task) -> Unit,
   onModelsClicked: () -> Unit,
-  navigateToChatHistory: () -> Unit = {},
   onNewChatClicked: () -> Unit = {},
   onImportModelClicked: () -> Unit = {},
   enableAnimation: Boolean,
@@ -480,18 +479,6 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("New Chat", maxLines = 1)
-                  }
-                  FilledTonalButton(
-                    onClick = navigateToChatHistory,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                  ) {
-                    Icon(
-                      Icons.Rounded.Forum,
-                      contentDescription = null,
-                      modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("History", maxLines = 1)
                   }
                   FilledTonalButton(
                     onClick = onImportModelClicked,

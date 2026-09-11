@@ -27,7 +27,6 @@ object OfflineMode {
         val prefs = getPrefs(context)
         prefs.edit().putBoolean(KEY_OFFLINE_MODE, enabled).apply()
         _isEnabled.value = enabled
-        SecurityAuditLog.log(context, "OFFLINE_MODE_${if (enabled) "ENABLED" else "DISABLED"}")
     }
 
     fun toggle(context: Context) {

@@ -23,12 +23,10 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.data.local.ChatRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.google.ai.edge.gallery.runtime.runtimeHelper
-import com.google.ai.edge.gallery.security.SecurityUtils
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageAudioClip
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageError
 import com.google.ai.edge.gallery.ui.common.chat.ChatMessageLoading
@@ -55,11 +53,6 @@ private const val TAG = "AGLlmChatViewModel"
 @OptIn(ExperimentalApi::class)
 open class LlmChatViewModelBase() : ChatViewModel() {
 
-  // Box: Chat persistence — will be injected by Hilt in concrete subclasses
-  override lateinit var chatRepository: ChatRepository
-  private var currentConversationId: String? = null
-  private val conversationMutex = Mutex()
-
   private val _currentSystemPrompt = MutableStateFlow("")
   val currentSystemPrompt: StateFlow<String> = _currentSystemPrompt.asStateFlow()
 
@@ -69,145 +62,6 @@ open class LlmChatViewModelBase() : ChatViewModel() {
 
   fun updateSystemPrompt(prompt: String) {
     _currentSystemPrompt.value = prompt
-    val convId = currentConversationId ?: return
-    viewModelScope.launch(Dispatchers.IO) {
-      try {
-        val conv = chatRepository.getConversationById(convId) ?: return@launch
-        chatRepository.updateConversation(conv.copy(systemPrompt = prompt))
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to persist system prompt", e)
-      }
-    }
-  }
-
-  suspend fun getConversationById(conversationId: String) =
-    chatRepository.getConversationById(conversationId)
-
-  /**
-   * Box: Set the current conversation ID for continuing an existing conversation
-   */
-  fun setCurrentConversationId(conversationId: String) {
-    currentConversationId = conversationId
-  }
-
-  /**
-   * Box: Look up the most recent conversation for a model (for auto-resume).
-   */
-  suspend fun getLatestConversationForModel(modelName: String): com.google.ai.edge.gallery.data.local.entities.Conversation? {
-    return try {
-      chatRepository.getLatestConversationForModel(modelName)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to get latest conversation for model", e)
-      null
-    }
-  }
-
-  /**
-   * Box: Load conversation history for continuing a conversation
-   */
-  suspend fun loadConversationHistory(conversationId: String): List<com.google.ai.edge.gallery.data.local.entities.Message>? {
-    val repo = chatRepository ?: return null
-    return try {
-      repo.getMessagesSync(conversationId)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to load conversation history", e)
-      null
-    }
-  }
-
-  /**
-   * Box: Persist a user message to the encrypted database.
-   */
-  private fun persistUserMessage(model: Model, content: String) {
-    val repo = chatRepository ?: return
-    Log.d(TAG, "Attempting to persist user message for model: ${model.name}")
-    viewModelScope.launch(Dispatchers.IO) {
-      try {
-        // Use Mutex to ensure thread-safe conversation creation
-        conversationMutex.withLock {
-          // Get or create conversation ID
-          val convId = if (currentConversationId == null) {
-            Log.d(TAG, "Creating new conversation for model: ${model.name}")
-            val conv = repo.createConversation(
-              title = content.take(50),
-              taskType = "llm_chat",
-              modelName = model.name,
-              systemPrompt = _currentSystemPrompt.value,
-            )
-            currentConversationId = conv.id
-            Log.d(TAG, "Created conversation with ID: ${conv.id}")
-            conv.id
-          } else {
-            currentConversationId!!
-          }
-          
-          // Now save the message with the guaranteed conversation ID
-          try {
-            repo.saveMessage(
-              conversationId = convId,
-              role = "user",
-              content = SecurityUtils.sanitizePrompt(content),
-            )
-            Log.d(TAG, "Successfully persisted user message to conversation: $convId")
-          } catch (fkException: android.database.sqlite.SQLiteConstraintException) {
-            Log.w(TAG, "Foreign key constraint failed, conversation might not be committed yet. Retrying...", fkException)
-            // Retry after a short delay to ensure conversation is committed
-            kotlinx.coroutines.delay(100)
-            repo.saveMessage(
-              conversationId = convId,
-              role = "user",
-              content = SecurityUtils.sanitizePrompt(content),
-            )
-            Log.d(TAG, "Successfully persisted user message to conversation on retry: $convId")
-          }
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to persist user message", e)
-      }
-    }
-  }
-
-  /**
-   * Box: Persist an assistant response to the encrypted database.
-   */
-  private fun persistAssistantMessage(model: Model, content: String, latencyMs: Long = 0) {
-    val repo = chatRepository ?: return
-    Log.d(TAG, "Attempting to persist assistant message for model: ${model.name}")
-    viewModelScope.launch(Dispatchers.IO) {
-      try {
-        // Use Mutex to ensure thread-safe message saving
-        conversationMutex.withLock {
-          val convId = currentConversationId
-          if (convId == null) {
-            Log.w(TAG, "No conversation ID available for assistant message, skipping persistence")
-            return@withLock
-          }
-          
-          try {
-            repo.saveMessage(
-              conversationId = convId,
-              role = "assistant",
-              content = content,
-              latencyMs = latencyMs,
-            )
-            Log.d(TAG, "Successfully persisted assistant message to conversation: $convId")
-          } catch (fkException: android.database.sqlite.SQLiteConstraintException) {
-            Log.w(TAG, "Foreign key constraint failed for assistant message, conversation might not be committed yet. Retrying...", fkException)
-            // Retry after a short delay to ensure conversation is committed
-            kotlinx.coroutines.delay(100)
-            repo.saveMessage(
-              conversationId = convId,
-              role = "assistant",
-              content = content,
-              latencyMs = latencyMs,
-            )
-            Log.d(TAG, "Successfully persisted assistant message to conversation on retry: $convId")
-          }
-        }
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to persist assistant message", e)
-      }
-    }
   }
 
   fun generateResponse(
@@ -224,11 +78,6 @@ open class LlmChatViewModelBase() : ChatViewModel() {
     viewModelScope.launch(Dispatchers.Default) {
       setInProgress(true)
       setPreparing(true)
-
-      // Box: Persist user message to encrypted DB
-      if (input.isNotEmpty()) {
-        persistUserMessage(model, input)
-      }
 
       // Loading.
       addMessage(model = model, message = ChatMessageLoading(accelerator = accelerator))
@@ -362,12 +211,6 @@ open class LlmChatViewModelBase() : ChatViewModel() {
                 }
                 setInProgress(false)
                 onDone()
-
-                // Box: Persist assistant response to encrypted DB
-                val assistantMsg = getLastMessageWithTypeAndSide(model, ChatMessageType.TEXT, ChatSide.AGENT)
-                if (assistantMsg is ChatMessageText && assistantMsg.content.isNotEmpty()) {
-                  persistAssistantMessage(model, assistantMsg.content, assistantMsg.latencyMs.toLong())
-                }
               }
             }
           }
@@ -515,20 +358,8 @@ open class LlmChatViewModelBase() : ChatViewModel() {
   }
 }
 
-@HiltViewModel class LlmChatViewModel @Inject constructor(
-  repo: ChatRepository
-) : LlmChatViewModelBase() {
-  init { chatRepository = repo }
-}
+@HiltViewModel class LlmChatViewModel @Inject constructor() : LlmChatViewModelBase()
 
-@HiltViewModel class LlmAskImageViewModel @Inject constructor(
-  repo: ChatRepository
-) : LlmChatViewModelBase() {
-  init { chatRepository = repo }
-}
+@HiltViewModel class LlmAskImageViewModel @Inject constructor() : LlmChatViewModelBase()
 
-@HiltViewModel class LlmAskAudioViewModel @Inject constructor(
-  repo: ChatRepository
-) : LlmChatViewModelBase() {
-  init { chatRepository = repo }
-}
+@HiltViewModel class LlmAskAudioViewModel @Inject constructor() : LlmChatViewModelBase()
