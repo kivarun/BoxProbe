@@ -114,9 +114,6 @@ dependencies {
   implementation(libs.sqlcipher.android)
   implementation(libs.sqlite)
 
-  // Box: llama.cpp native inference module for GGUF models
-  implementation(project(":smollm"))
-
   // Box: Material 3 adaptive navigation
   implementation(libs.androidx.material3.adaptive.navigation.suite)
   implementation(libs.androidx.material3.window.size)

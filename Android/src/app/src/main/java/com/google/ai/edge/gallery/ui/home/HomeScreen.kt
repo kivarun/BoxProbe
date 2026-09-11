@@ -507,7 +507,7 @@ fun HomeScreen(
                     Column {
                       Text("Import", maxLines = 1)
                       Text(
-                        "GGUF · LiteRT",
+                        "LiteRT",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                       )

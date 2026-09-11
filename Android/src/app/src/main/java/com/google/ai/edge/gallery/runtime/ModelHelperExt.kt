@@ -16,10 +16,8 @@
 
 package com.google.ai.edge.gallery.runtime
 
-import com.google.ai.edge.gallery.data.IMPORTS_DIR
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
-import com.google.ai.edge.gallery.engine.InferenceEngineType
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
 import com.google.ai.edge.gallery.ui.llmchat.LlmChatModelHelper
 
@@ -27,16 +25,6 @@ val Model.runtimeHelper: LlmModelHelper
   get() {
     if (this.runtimeType == RuntimeType.AICORE) {
       return AICoreModelHelper
-    }
-    // Box: Route GGUF models through llama.cpp engine
-    // For imported models, downloadFileName includes the IMPORTS_DIR prefix, so extract just the filename
-    val fileNameToCheck = if (imported && downloadFileName.startsWith("$IMPORTS_DIR/")) {
-      downloadFileName.substringAfter("$IMPORTS_DIR/")
-    } else {
-      downloadFileName
-    }
-    if (InferenceEngineType.fromModelPath(fileNameToCheck) == InferenceEngineType.LLAMA_CPP) {
-      return LlamaCppModelHelper
     }
     return LlmChatModelHelper
   }
