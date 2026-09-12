@@ -328,8 +328,7 @@ private fun NpuProbePanel(
       InfoRow("Artifact", selectedModel.downloadFileName, monospace = true)
       InfoRow("Backend", selectedModel.accelerators.joinToString(" / ") { it.label })
       InfoRow("Target SoC", selectedModel.targetSoc ?: "generic")
-      InfoRow("Detected SoC", Build.SOC_MODEL.ifEmpty { "—" }, monospace = true)
-    }
+      InfoRow("Detected SoC", Build.SOC_MODEL.ifEmpty { "—" }, monospace = true)    }
   }
 
   Button(onClick = onRunProbe, enabled = selectedModel != null) {
@@ -345,6 +344,21 @@ private fun NpuProbePanel(
     InfoRow("Requested backend", "NPU")
     InfoRow("nativeLibraryDir", precheck.nativeLibraryDir, monospace = true)
     InfoRow("Model path", precheck.modelPath, monospace = true)
+    InfoRow("Vendor", precheck.vendorLabel)
+    InfoRow(
+      "Vendor dispatch dir",
+      precheck.vendorDispatchDirPath.ifEmpty { "—" },
+      monospace = true,
+    )
+    InfoRow("Vendor dir exists", if (precheck.vendorDispatchDirExists) "yes" else "no")
+    InfoRow("Vendor dir .so count", precheck.vendorDispatchVisibleSoCount.toString())
+    if (precheck.vendorDispatchVisibleSoNames.isNotEmpty()) {
+      InfoRow(
+        "Vendor dir .so names",
+        precheck.vendorDispatchVisibleSoNames.joinToString("\n"),
+        monospace = true,
+      )
+    }
     InfoRow("Directory exists", if (precheck.directoryExists) "yes" else "no")
     InfoRow("Directory readable", if (precheck.directoryReadable) "yes" else "no")
     InfoRow("Visible .so count", precheck.visibleSoCount.toString())

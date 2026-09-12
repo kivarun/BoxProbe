@@ -1,6 +1,7 @@
 package com.google.ai.edge.gallery.systeminfo
 
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.DEFAULT_MAX_TOKEN
@@ -35,7 +36,8 @@ data class NpuProbeStageResult(
 /**
  * Diagnostics captured before any LiteRT call: the exact upstream
  * `applicationInfo.nativeLibraryDir` value and what the filesystem directly exposes
- * there. Deliberately not derived from the package APK inventory.
+ * there, plus the vendor-isolated dispatch directory prepared for the device vendor.
+ * Deliberately not derived from the package APK inventory.
  */
 data class NpuProbePrecheck(
   val model: String,
@@ -45,6 +47,11 @@ data class NpuProbePrecheck(
   val directoryReadable: Boolean,
   val visibleSoCount: Int,
   val visibleSoNames: List<String>,
+  val vendorLabel: String = "",
+  val vendorDispatchDirPath: String = "",
+  val vendorDispatchDirExists: Boolean = false,
+  val vendorDispatchVisibleSoCount: Int = 0,
+  val vendorDispatchVisibleSoNames: List<String> = emptyList(),
 )
 
 enum class NpuProbeStatus {
@@ -105,10 +112,59 @@ object NpuRuntimeProbe {
           IllegalStateException("nativeLibraryDir '$nativeLibraryDir' does not exist")
         else -> null
       }
-    stageResults.add(stageResult(NpuProbeStage.PRECHECK, precheckStart, precheckError))
-    if (precheckError != null) {
+
+    // Vendor-isolated dispatch runtime: on multi-vendor devices the plain
+    // nativeLibraryDir exposes dispatch libraries of several vendors and LiteRT may
+    // pick an unrelated one (observed: GoogleTensor chosen on MT6991). Prepare an
+    // app-private directory with symlinks to only the device vendor's libraries and
+    // point the NPU backend at it.
+    var vendorDispatch: VendorDispatchPreparation? = null
+    var vendorDispatchError: Throwable? = null
+    if (precheckError == null) {
+      val socVendor =
+        SocVendorDetector.detect(
+          socManufacturer = Build.SOC_MANUFACTURER ?: "",
+          socModel = Build.SOC_MODEL ?: "",
+        )
+      val dispatchVendor = npuDispatchVendorForDevice(socVendor)
+      if (dispatchVendor == null) {
+        vendorDispatchError =
+          IllegalStateException(
+            "NPU dispatch isolation is not available for device SoC vendor: ${socVendor.name}"
+          )
+      } else {
+        val prepared = prepareVendorDispatchRuntime(context, dispatchVendor)
+        vendorDispatch = prepared
+        vendorDispatchError =
+          when {
+            prepared.errors.isNotEmpty() ->
+              IllegalStateException(
+                "Vendor dispatch preparation failed: ${prepared.errors.joinToString("; ")}"
+              )
+            prepared.missingRequired.isNotEmpty() ->
+              IllegalStateException(
+                "Required ${dispatchVendor.label} dispatch libraries missing from " +
+                  "nativeLibraryDir: ${prepared.missingRequired}"
+              )
+            else -> null
+          }
+      }
+    }
+
+    val enrichedPrecheck =
+      precheck.copy(
+        vendorLabel = vendorDispatch?.vendor?.label ?: "unknown",
+        vendorDispatchDirPath = vendorDispatch?.vendorDispatchDir?.absolutePath ?: "",
+        vendorDispatchDirExists = vendorDispatch?.dirExists ?: false,
+        vendorDispatchVisibleSoCount = vendorDispatch?.visibleSoNames?.size ?: 0,
+        vendorDispatchVisibleSoNames = vendorDispatch?.visibleSoNames ?: emptyList(),
+      )
+
+    val precheckFailure = precheckError ?: vendorDispatchError
+    stageResults.add(stageResult(NpuProbeStage.PRECHECK, precheckStart, precheckFailure))
+    if (precheckFailure != null) {
       return NpuProbeResult(
-        precheck = precheck,
+        precheck = enrichedPrecheck,
         stageResults = stageResults,
         failedStage = NpuProbeStage.PRECHECK,
         totalDurationMs = elapsedSince(startTotal),
@@ -122,12 +178,16 @@ object NpuRuntimeProbe {
       // --- Stage 2: BACKEND_CREATED. ---
       val backendHolder = arrayOfNulls<Backend>(1)
       recordStage(stageResults, NpuProbeStage.BACKEND_CREATED) {
-        // Exact upstream path, identical to LlmChatModelHelper for NPU/TPU.
-        backendHolder[0] = Backend.NPU(nativeLibraryDir = nativeLibraryDir)
+        // Same expression as LlmChatModelHelper for NPU/TPU, but pointing at the
+        // vendor-isolated dispatch directory prepared in PRECHECK.
+        backendHolder[0] =
+          Backend.NPU(
+            nativeLibraryDir = vendorDispatch!!.vendorDispatchDir.absolutePath
+          )
       }
         ?.let {
           return NpuProbeResult(
-            precheck,
+            enrichedPrecheck,
             stageResults,
             NpuProbeStage.BACKEND_CREATED,
             elapsedSince(startTotal),
@@ -153,7 +213,7 @@ object NpuRuntimeProbe {
       recordStage(stageResults, NpuProbeStage.ENGINE_CREATED) { engine = Engine(engineConfig) }
         ?.let {
           return NpuProbeResult(
-            precheck,
+            enrichedPrecheck,
             stageResults,
             NpuProbeStage.ENGINE_CREATED,
             elapsedSince(startTotal),
@@ -164,7 +224,7 @@ object NpuRuntimeProbe {
       recordStage(stageResults, NpuProbeStage.ENGINE_INITIALIZED) { engine!!.initialize() }
         ?.let {
           return NpuProbeResult(
-            precheck,
+            enrichedPrecheck,
             stageResults,
             NpuProbeStage.ENGINE_INITIALIZED,
             elapsedSince(startTotal),
@@ -178,7 +238,7 @@ object NpuRuntimeProbe {
       }
         ?.let {
           return NpuProbeResult(
-            precheck,
+            enrichedPrecheck,
             stageResults,
             NpuProbeStage.CONVERSATION_CREATED,
             elapsedSince(startTotal),
@@ -191,7 +251,7 @@ object NpuRuntimeProbe {
     }
 
     return NpuProbeResult(
-      precheck = precheck,
+      precheck = enrichedPrecheck,
       stageResults = stageResults,
       failedStage = null,
       totalDurationMs = elapsedSince(startTotal),
