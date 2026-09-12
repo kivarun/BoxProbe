@@ -116,7 +116,7 @@ std::string handshakeJson(const std::string& libraryPath) {
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_handshake(
+Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_handshakeNative(
     JNIEnv* env, jclass /*clazz*/, jstring libraryPath) {
   std::string json = handshakeJson(jstringToStd(env, libraryPath));
   return env->NewStringUTF(json.c_str());
