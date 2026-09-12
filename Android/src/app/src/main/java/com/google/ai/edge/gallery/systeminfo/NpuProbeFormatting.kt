@@ -46,7 +46,7 @@ fun npuProbeFormatDuration(millis: Long): String =
  * Diagnostic rows for the dispatch API handshake (order matches the UI),
  * e.g. "API version" -> "0.1.0", "Async interface" -> "absent"/"present".
  */
-fun npuProbeHandshakeRows(handshake: NpuDispatchHandshakeBridge.HandshakeResult): List<Pair<String, String>> {
+fun npuProbeHandshakeRows(handshake: NpuDispatchHandshakeResult): List<Pair<String, String>> {
   val rows = mutableListOf<Pair<String, String>>()
   rows.add("Dispatch API status" to handshake.status)
   rows.add("API version" to "${handshake.major}.${handshake.minor}.${handshake.patch}")

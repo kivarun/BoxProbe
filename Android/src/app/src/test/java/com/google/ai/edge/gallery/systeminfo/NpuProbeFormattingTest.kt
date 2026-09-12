@@ -6,6 +6,19 @@ import org.junit.Test
 
 class NpuProbeFormattingTest {
 
+  @org.junit.Test
+  fun handshakeParse_mapsInterfaceKeyToPresentFlags() {
+    val parsed =
+      parseNpuDispatchHandshakeJson(
+        "{\"status\":\"OK\",\"major\":0,\"minor\":1,\"patch\":0,\"interface\":true," +
+          "\"async\":false,\"graph\":false,\"errorCode\":0}",
+      )
+    assertEquals(true, parsed?.interfacePresent)
+    assertEquals(false, parsed?.asyncPresent)
+    assertEquals(false, parsed?.graphPresent)
+    assertEquals("0.1.0", "${parsed?.major}.${parsed?.minor}.${parsed?.patch}")
+  }
+
   private fun passedStage(stage: NpuProbeStage, durationMs: Long = 10L) =
     NpuProbeStageResult(
       stage = stage,
@@ -154,7 +167,7 @@ class NpuProbeFormattingTest {
   fun handshakeRows_showVersionAndInterfacePresence() {
     val rows =
       npuProbeHandshakeRows(
-        NpuDispatchHandshakeBridge.HandshakeResult(
+        NpuDispatchHandshakeResult(
           status = "OK",
           major = 0,
           minor = 1,
@@ -180,7 +193,7 @@ class NpuProbeFormattingTest {
   fun handshakeRows_includeRawErrorWhenPresent() {
     val rows =
       npuProbeHandshakeRows(
-        NpuDispatchHandshakeBridge.HandshakeResult(
+        NpuDispatchHandshakeResult(
           status = "ERROR",
           error = "dlopen failed: nope",
         ),

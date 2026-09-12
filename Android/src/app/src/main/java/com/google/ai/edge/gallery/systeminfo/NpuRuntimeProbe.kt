@@ -70,7 +70,7 @@ data class NpuProbeResult(
      */
     val stoppedAfterStage: NpuProbeStage? = null,
     /** Dispatch API handshake diagnostics, when the handshake stage ran. */
-    val dispatchHandshake: NpuDispatchHandshakeBridge.HandshakeResult? = null,
+    val dispatchHandshake: NpuDispatchHandshakeResult? = null,
     val totalDurationMs: Long,
   )
 
@@ -180,11 +180,11 @@ object NpuRuntimeProbe {
     // interface pointers. It never calls initialize and never touches Neuron.
     val handshakeStart = SystemClock.elapsedRealtime()
     var handshakeError: Throwable? = null
-    var handshake: NpuDispatchHandshakeBridge.HandshakeResult? = null
+    var handshake: NpuDispatchHandshakeResult? = null
     try {
       val json = NpuDispatchHandshakeBridge.handshake(dispatchPath)
       handshake =
-        NpuDispatchHandshakeBridge.parse(json)
+        parseNpuDispatchHandshakeJson(json)
           ?: throw IllegalStateException("Dispatch handshake: unparsable result: $json")
       if (handshake.status != "OK") {
         throw IllegalStateException(
