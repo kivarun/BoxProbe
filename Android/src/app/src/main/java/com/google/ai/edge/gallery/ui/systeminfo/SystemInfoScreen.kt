@@ -57,7 +57,7 @@ import java.util.Date
 fun SystemInfoScreen(
   onBackClicked: () -> Unit,
   viewModel: SystemInfoViewModel = hiltViewModel(),
-  modelManagerViewModel: ModelManagerViewModel = hiltViewModel(),
+  modelManagerViewModel: ModelManagerViewModel,
 ) {
   val snapshot by viewModel.snapshot.collectAsState()
   val collecting by viewModel.collecting.collectAsState()

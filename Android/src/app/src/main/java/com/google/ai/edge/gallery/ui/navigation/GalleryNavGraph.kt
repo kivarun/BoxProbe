@@ -194,6 +194,7 @@ fun GalleryNavHost(
       exitTransition = { slideDownExit() },
     ) {
       SystemInfoScreen(
+        modelManagerViewModel = modelManagerViewModel,
         onBackClicked = {
           enableHomeScreenAnimation = false
           navController.navigateUp()
