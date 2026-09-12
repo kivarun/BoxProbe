@@ -2,9 +2,12 @@ package com.google.ai.edge.gallery.systeminfo
 
 /** Label shown in the "Runtime validated" row for the device-matched vendor. */
 fun npuProbeRuntimeValidatedLabel(status: NpuProbeStatus, result: NpuProbeResult?): String =
-  when (status) {
-    NpuProbeStatus.INITIALIZATION_FAILED ->
+  when {
+    status == NpuProbeStatus.INITIALIZATION_FAILED ->
       result?.failedStage?.let { "Failed at ${it.name}" } ?: "Initialization failed"
+    status == NpuProbeStatus.INITIALIZATION_PASSED &&
+      result?.stoppedAfterStage == NpuProbeStage.DISPATCH_LIBRARY_LOAD ->
+      "Dispatch library loaded"
     else -> npuProbeStatusLabel(status)
   }
 

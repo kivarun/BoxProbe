@@ -344,6 +344,9 @@ private fun NpuProbePanel(
     InfoRow("Requested backend", "NPU")
     InfoRow("nativeLibraryDir", precheck.nativeLibraryDir, monospace = true)
     InfoRow("Model path", precheck.modelPath, monospace = true)
+    if (precheck.dispatchLibraryPath.isNotEmpty()) {
+      InfoRow("Dispatch library path", precheck.dispatchLibraryPath, monospace = true)
+    }
     InfoRow("Vendor", precheck.vendorLabel)
     InfoRow(
       "Vendor dispatch dir",

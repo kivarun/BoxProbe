@@ -2,20 +2,13 @@ package com.google.ai.edge.gallery.systeminfo
 
 import android.content.Context
 import android.os.SystemClock
-import com.google.ai.edge.gallery.data.ConfigKeys
-import com.google.ai.edge.gallery.data.DEFAULT_MAX_TOKEN
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.litertlm.Backend
-import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.ConversationConfig
-import com.google.ai.edge.litertlm.Engine
-import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.ExperimentalApi
 import java.io.File
 
 /** Stages of the active NPU initialization probe, in execution order. */
 enum class NpuProbeStage {
   PRECHECK,
+  DISPATCH_LIBRARY_LOAD,
   BACKEND_CREATED,
   ENGINE_CREATED,
   ENGINE_INITIALIZED,
@@ -51,6 +44,8 @@ data class NpuProbePrecheck(
   val vendorDispatchDirExists: Boolean = false,
   val vendorDispatchVisibleSoCount: Int = 0,
   val vendorDispatchVisibleSoNames: List<String> = emptyList(),
+  /** Absolute path of the dispatch library loaded by the diagnostic dlopen stage. */
+  val dispatchLibraryPath: String = "",
 )
 
 enum class NpuProbeStatus {
@@ -67,6 +62,11 @@ data class NpuProbeResult(
   val stageResults: List<NpuProbeStageResult>,
   /** Stage where the probe stopped, or null when every stage passed (SUCCESS). */
   val failedStage: NpuProbeStage?,
+  /**
+   * Last executed stage for diagnostic runs that intentionally stop before the
+   * full initialization path, or null when the run ran through.
+   */
+  val stoppedAfterStage: NpuProbeStage? = null,
   val totalDurationMs: Long,
 )
 
@@ -83,11 +83,13 @@ object NpuRuntimeProbe {
   /** At most this many .so names are recorded in the precheck diagnostics. */
   const val MAX_LISTED_SO_NAMES = 20
 
+  /** MediaTek dispatch library loaded by the diagnostic dlopen stage. */
+  const val DISPATCH_LIBRARY_NAME = "libLiteRtDispatch_MediaTek.so"
+
   /**
    * Runs the probe for [model] on the caller thread. Blocking native calls are
    * expected; callers must invoke this off the main thread.
    */
-  @OptIn(ExperimentalApi::class)
   fun run(context: Context, model: Model): NpuProbeResult {
     val startTotal = SystemClock.elapsedRealtime()
     val stageResults = mutableListOf<NpuProbeStageResult>()
@@ -121,105 +123,30 @@ object NpuRuntimeProbe {
       )
     }
 
-    var engine: Engine? = null
-    var conversation: Conversation? = null
-
-    try {
-      // --- Stage 2: BACKEND_CREATED. ---
-      val backendHolder = arrayOfNulls<Backend>(1)
-      recordStage(stageResults, NpuProbeStage.BACKEND_CREATED) {
-        // Upstream-style path: the installer-managed nativeLibraryDir, which in this
-        // UAT build contains only the MediaTek dispatch runtime.
-        backendHolder[0] = Backend.NPU(nativeLibraryDir = nativeLibraryDir)
-      }
-        ?.let {
-          return NpuProbeResult(
-            precheck,
-            stageResults,
-            NpuProbeStage.BACKEND_CREATED,
-            elapsedSince(startTotal),
-          )
-        }
-
-      val maxTokens =
-        model.getIntConfigValue(key = ConfigKeys.MAX_TOKENS, defaultValue = DEFAULT_MAX_TOKEN)
-      val engineConfig =
-        EngineConfig(
-          modelPath = modelPath,
-          backend = backendHolder[0]!!,
-          maxNumTokens = maxTokens,
-          cacheDir =
-            if (modelPath.startsWith("/data/local/tmp")) {
-              context.getExternalFilesDir(null)?.absolutePath
-            } else {
-              null
-            },
-        )
-
-      // --- Stage 3: ENGINE_CREATED. ---
-      recordStage(stageResults, NpuProbeStage.ENGINE_CREATED) { engine = Engine(engineConfig) }
-        ?.let {
-          return NpuProbeResult(
-            precheck,
-            stageResults,
-            NpuProbeStage.ENGINE_CREATED,
-            elapsedSince(startTotal),
-          )
-        }
-
-      // --- Stage 4: ENGINE_INITIALIZED. ---
-      recordStage(stageResults, NpuProbeStage.ENGINE_INITIALIZED) { engine!!.initialize() }
-        ?.let {
-          return NpuProbeResult(
-            precheck,
-            stageResults,
-            NpuProbeStage.ENGINE_INITIALIZED,
-            elapsedSince(startTotal),
-          )
-        }
-
-      // --- Stage 5: CONVERSATION_CREATED. ---
-      // No SamplerConfig, matching the production NPU path in LlmChatModelHelper.
-      recordStage(stageResults, NpuProbeStage.CONVERSATION_CREATED) {
-        conversation = engine!!.createConversation(ConversationConfig(samplerConfig = null))
-      }
-        ?.let {
-          return NpuProbeResult(
-            precheck,
-            stageResults,
-            NpuProbeStage.CONVERSATION_CREATED,
-            elapsedSince(startTotal),
-          )
-        }
-    } finally {
-      // Cleanup runs both after success and after any partial initialization failure.
-      closeQuietly { conversation?.close() }
-      closeQuietly { engine?.close() }
-    }
-
-    return NpuProbeResult(
-      precheck = precheck,
-      stageResults = stageResults,
-      failedStage = null,
-      totalDurationMs = elapsedSince(startTotal),
-    )
-  }
-
-  private inline fun recordStage(
-    stageResults: MutableList<NpuProbeStageResult>,
-    stage: NpuProbeStage,
-    block: () -> Unit,
-  ): Throwable? {
-    val start = SystemClock.elapsedRealtime()
-    val error: Throwable? =
+    // --- Stage 2: DISPATCH_LIBRARY_LOAD (pure dlopen diagnostic, no LiteRT calls). ---
+    // The runtime's own "Loading shared library: …" line is printed before the actual
+    // dlopen, so its logs alone do not prove the library loaded. Load it explicitly.
+    val dispatchPath = File(nativeLibraryDir, DISPATCH_LIBRARY_NAME).absolutePath
+    val loadStart = SystemClock.elapsedRealtime()
+    val loadError: Throwable? =
       try {
-        block()
+        System.load(dispatchPath)
         null
       } catch (t: Throwable) {
         t
       }
-    stageResults.add(stageResult(stage, start, error))
-    return error
+    stageResults.add(stageResult(NpuProbeStage.DISPATCH_LIBRARY_LOAD, loadStart, loadError))
+
+    // Diagnostic build: the probe always stops here, engine initialization is a
+    // separate later increment.
+    return NpuProbeResult(
+      precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
+      stageResults = stageResults,
+      failedStage =
+        loadError?.let { NpuProbeStage.DISPATCH_LIBRARY_LOAD },
+      stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+      totalDurationMs = elapsedSince(startTotal),
+    )
   }
 
   private fun stageResult(
@@ -263,13 +190,5 @@ object NpuRuntimeProbe {
       visibleSoCount = soNames.size,
       visibleSoNames = soNames.take(MAX_LISTED_SO_NAMES),
     )
-  }
-
-  private fun closeQuietly(block: () -> Unit) {
-    try {
-      block()
-    } catch (_: Throwable) {
-      // A cleanup failure must not mask the probe outcome.
-    }
   }
 }

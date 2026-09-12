@@ -32,10 +32,12 @@ class NpuProbeFormattingTest {
   private fun result(
     stages: List<NpuProbeStageResult>,
     failedStage: NpuProbeStage?,
+    stoppedAfterStage: NpuProbeStage? = null,
   ) = NpuProbeResult(
     precheck = null,
     stageResults = stages,
     failedStage = failedStage,
+    stoppedAfterStage = stoppedAfterStage,
     totalDurationMs = 150L,
   )
 
@@ -44,6 +46,7 @@ class NpuProbeFormattingTest {
     assertEquals(
       listOf(
         "PRECHECK",
+        "DISPATCH_LIBRARY_LOAD",
         "BACKEND_CREATED",
         "ENGINE_CREATED",
         "ENGINE_INITIALIZED",
@@ -89,12 +92,26 @@ class NpuProbeFormattingTest {
   fun runtimeValidatedLabel_failedProbeNamesStage() {
     val probeResult =
       result(
-        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.ENGINE_INITIALIZED)),
-        failedStage = NpuProbeStage.ENGINE_INITIALIZED,
+        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD)),
+        failedStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
       )
     assertEquals(
-      "Failed at ENGINE_INITIALIZED",
+      "Failed at DISPATCH_LIBRARY_LOAD",
       npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_FAILED, probeResult),
+    )
+  }
+
+  @Test
+  fun runtimeValidatedLabel_diagnosticStopAfterDispatchLoad_showsDispatchLoaded() {
+    val probeResult =
+      result(
+        stages = listOf(passedStage(NpuProbeStage.PRECHECK), passedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD)),
+        failedStage = null,
+        stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+      )
+    assertEquals(
+      "Dispatch library loaded",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, probeResult),
     )
   }
 
