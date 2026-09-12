@@ -339,7 +339,7 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
   std::string json = "{\"status\":\"";
   json += (error.empty() && initStatus == 0) ? "OK" : "ERROR";
   json += "\",\"initStatus\":" + std::to_string(initStatus);
-  json += "\",\"optionsCreated\":";
+  json += ",\"optionsCreated\":";
   json += optionsCreated ? "true" : "false";
   json += ",\"adapterProbe\":";
   json += adapterProbeJson;
