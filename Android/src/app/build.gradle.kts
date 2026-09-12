@@ -117,6 +117,18 @@ android {
     compose = true
     buildConfig = true
   }
+  // Legacy JNI packaging: the installer extracts native libraries into the filesystem
+  // `nativeLibraryDir` instead of loading them only directly from the APK. LiteRT's
+  // NPU backend resolves vendor dispatch libraries relative to `nativeLibraryDir`.
+  // Groovy-style dynamic invocation: the legacy (android.newDsl=false) decorated
+  // extension rejects the statically typed Kotlin DSL lambdas.
+  withGroovyBuilder {
+    "packagingOptions" {
+      "jniLibs" {
+        "setUseLegacyPackaging"(true)
+      }
+    }
+  }
 }
 
 dependencies {
