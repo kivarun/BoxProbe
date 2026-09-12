@@ -72,6 +72,7 @@ import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
 import com.google.ai.edge.gallery.ui.home.HomeScreen
 import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
+import com.google.ai.edge.gallery.ui.systeminfo.SystemInfoScreen
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import kotlinx.coroutines.Dispatchers
@@ -82,6 +83,7 @@ private const val TAG = "AGGalleryNavGraph"
 private const val ROUTE_HOMESCREEN = "homepage"
 private const val ROUTE_BENCHMARK = "benchmark"
 private const val ROUTE_MODEL_MANAGER = "model_manager"
+private const val ROUTE_SYSTEM_INFO = "system_info"
 private const val ENTER_ANIMATION_DURATION_MS = 500
 private val ENTER_ANIMATION_EASING = EaseOutExpo
 private const val ENTER_ANIMATION_DELAY_MS = 100
@@ -176,12 +178,27 @@ fun GalleryNavHost(
           tosViewModel = hiltViewModel(),
           enableAnimation = enableHomeScreenAnimation,
           onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
+          onSystemInfoClicked = { navController.navigate(ROUTE_SYSTEM_INFO) },
           onImportModelClicked = {
             navController.navigate("$ROUTE_MODEL_MANAGER?startImport=true")
           },
           gm4 = true,
         )
       }
+    }
+
+    // System info page.
+    composable(
+      route = ROUTE_SYSTEM_INFO,
+      enterTransition = { slideUpEnter() },
+      exitTransition = { slideDownExit() },
+    ) {
+      SystemInfoScreen(
+        onBackClicked = {
+          enableHomeScreenAnimation = false
+          navController.navigateUp()
+        },
+      )
     }
 
     // Global model manager page.

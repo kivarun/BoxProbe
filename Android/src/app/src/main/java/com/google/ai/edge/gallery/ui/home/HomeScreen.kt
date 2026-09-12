@@ -58,6 +58,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
@@ -159,6 +160,7 @@ fun HomeScreen(
   tosViewModel: TosViewModel,
   onModelsClicked: () -> Unit,
   onImportModelClicked: () -> Unit = {},
+  onSystemInfoClicked: () -> Unit = {},
   enableAnimation: Boolean,
   modifier: Modifier = Modifier,
   gm4: Boolean = false,
@@ -420,6 +422,26 @@ fun HomeScreen(
                     .padding(bottom = 16.dp),
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                  FilledTonalButton(
+                    onClick = onSystemInfoClicked,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                  ) {
+                    Icon(
+                      Icons.Rounded.Info,
+                      contentDescription = null,
+                      modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Column {
+                      Text("System Info", maxLines = 1)
+                      Text(
+                        "Runtime probe",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                      )
+                    }
+                  }
                   FilledTonalButton(
                     onClick = onImportModelClicked,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
