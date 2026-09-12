@@ -30,7 +30,7 @@ android {
   compileSdk = 36
 
   defaultConfig {
-    applicationId = "com.box.gallery"
+    applicationId = "com.kivarun.boxprobe"
     minSdk = 35
     targetSdk = 37
     versionCode = 26

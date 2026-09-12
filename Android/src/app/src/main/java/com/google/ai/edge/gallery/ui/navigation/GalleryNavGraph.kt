@@ -268,7 +268,7 @@ fun GalleryNavHost(
   if (data != null) {
     intent.data = null
     Log.d(TAG, "navigation link clicked: $data")
-    if (data.toString() == "com.google.ai.edge.gallery://global_model_manager") {
+    if (data.toString() == "com.kivarun.boxprobe://global_model_manager") {
       navController.navigate(ROUTE_MODEL_MANAGER)
     }
   }
