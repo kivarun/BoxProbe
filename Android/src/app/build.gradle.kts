@@ -92,6 +92,7 @@ dependencies {
   implementation(libs.hilt.android)
   implementation(libs.hilt.navigation.compose)
   implementation(libs.play.services.oss.licenses)
+  implementation(libs.androidx.documentfile)
 
   // Box: Material 3 adaptive navigation
   implementation(libs.androidx.material3.adaptive.navigation.suite)
