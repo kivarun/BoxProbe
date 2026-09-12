@@ -28,6 +28,15 @@ data class NpuProbeUiState(
   val selectedModelName: String? = null,
 )
 
+/** Static build identity shown by the System Info screen. */
+data class BuildInfoSnapshot(
+  val versionName: String,
+  val versionCode: Int,
+  val gitCommit: String,
+  val applicationId: String,
+  val buildType: String,
+)
+
 @HiltViewModel
 class SystemInfoViewModel
 @Inject
@@ -44,11 +53,22 @@ constructor(
   private val _npuProbeState = MutableStateFlow(NpuProbeUiState())
   val npuProbeState = _npuProbeState.asStateFlow()
 
+  val buildInfo: BuildInfoSnapshot = readBuildInfo()
+
   private var availabilityObservationStarted = false
 
   init {
     collect()
   }
+
+  private fun readBuildInfo(): BuildInfoSnapshot =
+    BuildInfoSnapshot(
+      versionName = com.google.ai.edge.gallery.BuildConfig.VERSION_NAME,
+      versionCode = com.google.ai.edge.gallery.BuildConfig.VERSION_CODE,
+      gitCommit = com.google.ai.edge.gallery.BuildConfig.GIT_COMMIT,
+      applicationId = com.google.ai.edge.gallery.BuildConfig.APPLICATION_ID,
+      buildType = com.google.ai.edge.gallery.BuildConfig.BUILD_TYPE,
+    )
 
   fun collect() {
     if (_collecting.value) return

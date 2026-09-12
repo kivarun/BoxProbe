@@ -25,6 +25,31 @@ plugins {
   kotlin("kapt")
 }
 
+/**
+ * Resolves the git commit exposed through BuildConfig.GIT_COMMIT.
+ *
+ * Priority: env BOXPROBE_GIT_COMMIT, then `git rev-parse --short=12 HEAD`, then
+ * "unknown". A missing git metadata must not break the build.
+ */
+fun resolveGitCommit(): String {
+  val envValue = System.getenv("BOXPROBE_GIT_COMMIT")
+  if (!envValue.isNullOrBlank()) {
+    return envValue.trim()
+  }
+  return try {
+    val process = ProcessBuilder("git", "rev-parse", "--short=12", "HEAD").start()
+    val output = process.inputStream.bufferedReader().readText().trim()
+    val exitCode = process.waitFor()
+    if (exitCode == 0 && Regex("^[0-9a-fA-F]{6,40}$").matches(output)) {
+      output.lowercase()
+    } else {
+      "unknown"
+    }
+  } catch (_: Exception) {
+    "unknown"
+  }
+}
+
 android {
   namespace = "com.google.ai.edge.gallery"
   compileSdk = 36
@@ -35,6 +60,12 @@ android {
     targetSdk = 37
     versionCode = 26
     versionName = "1.0.12"
+
+    buildConfigField(
+      "String",
+      "GIT_COMMIT",
+      "\"${resolveGitCommit().replace("\\", "\\\\").replace("\"", "\\\"")}\"",
+    )
 
     // Needed for HuggingFace auth workflows.
     // Use the scheme of the "Redirect URLs" in HuggingFace app.

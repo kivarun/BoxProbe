@@ -35,9 +35,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.rounded.Error
@@ -71,7 +69,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
@@ -145,17 +142,17 @@ fun DownloadAndTryButton(
   var downloadStarted by remember { mutableStateOf(false) }
   val sheetState = rememberModalBottomSheetState()
 
-  val needToDownloadFirst =
-    (downloadStatus?.status == ModelDownloadStatusType.NOT_DOWNLOADED ||
-      downloadStatus?.status == ModelDownloadStatusType.FAILED) &&
-      model.localFileRelativeDirPathOverride.isEmpty() &&
-      model.runtimeType != RuntimeType.AICORE
-  val inProgress = downloadStatus?.status == ModelDownloadStatusType.IN_PROGRESS
   val downloadSucceeded = downloadStatus?.status == ModelDownloadStatusType.SUCCEEDED
-  val isPartiallyDownloaded = downloadStatus?.status == ModelDownloadStatusType.PARTIALLY_DOWNLOADED
-  val showDownloadProgress =
-    !downloadSucceeded && (downloadStarted || checkingToken || inProgress || isPartiallyDownloaded)
-  var curDownloadProgress: Float
+  val requiresDownload =
+    model.localFileRelativeDirPathOverride.isEmpty() && model.runtimeType != RuntimeType.AICORE
+  val controlState =
+    modelDownloadControlState(
+      status = downloadStatus?.status,
+      downloadStarted = downloadStarted,
+      checkingToken = checkingToken,
+      requiresDownload = requiresDownload,
+    )
+  val needToDownloadFirst = controlState == ModelDownloadControlState.DOWNLOAD
 
   // A launcher for requesting notification permission.
   val permissionLauncher =
@@ -334,165 +331,150 @@ fun DownloadAndTryButton(
 
   val checkMemoryAndClickDownloadButton = { handleClickButton() }
 
-  if (!showDownloadProgress && needToDownloadFirst) {
-    var buttonModifier: Modifier = modifier.height(42.dp)
-    if (!compact) {
-      buttonModifier = buttonModifier.then(modifierWhenExpanded)
-    }
-    Button(
-      modifier = buttonModifier,
-      colors =
-        ButtonDefaults.buttonColors(
-          containerColor =
-            if (
-              (!downloadSucceeded || !canShowTryIt) &&
-                model.localFileRelativeDirPathOverride.isEmpty()
-            ) {
+  when (controlState) {
+    ModelDownloadControlState.DOWNLOAD -> {
+      var buttonModifier: Modifier = modifier.height(42.dp)
+      if (!compact) {
+        buttonModifier = buttonModifier.then(modifierWhenExpanded)
+      }
+      Button(
+        modifier = buttonModifier,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor =
+              if (
+                (!downloadSucceeded || !canShowTryIt) &&
+                  model.localFileRelativeDirPathOverride.isEmpty()
+              ) {
+                MaterialTheme.colorScheme.surfaceContainer
+              } else if (task != null) {
+                getTaskBgGradientColors(task = task)[1]
+              } else {
+                MaterialTheme.colorScheme.primary
+              }
+          ),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        onClick = {
+          if (!enabled || checkingToken) {
+            return@Button
+          }
 
-              MaterialTheme.colorScheme.surfaceContainer
-            } else if (task != null) {
-              getTaskBgGradientColors(task = task)[1]
-            } else {
-              MaterialTheme.colorScheme.primary
-            }
-        ),
-      contentPadding = PaddingValues(horizontal = 12.dp),
-      onClick = {
-        if (!enabled || checkingToken) {
-          return@Button
-        }
-
-        // Check TOS before downloading.
-        if (
-          model.url.startsWith("https://dl.google.com/google-ai-edge-gallery/") &&
-            MODEL_NAMES_TO_SHOW_GEMMA_LICENSES.contains(model.name) &&
-            !tosViewModel.getIsGemmaTermsOfUseAccepted()
-        ) {
-          showGemmaTermsOfUseDialog = true
-        } else {
-          checkMemoryAndClickDownloadButton()
-        }
-      },
-    ) {
-      val textColor =
-        if (!enabled) {
-          // Define the color for disabled button.
-          MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-        } else if (!downloadSucceeded && model.localFileRelativeDirPathOverride.isEmpty()) {
-          MaterialTheme.colorScheme.onSurface
-        } else if (task != null) {
-          Color.White
-        } else {
-          MaterialTheme.colorScheme.onPrimary
-        }
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        Icon(
-          if (needToDownloadFirst) {
-            Icons.Outlined.FileDownload
+          // Check TOS before downloading.
+          if (
+            model.url.startsWith("https://dl.google.com/google-ai-edge-gallery/") &&
+              MODEL_NAMES_TO_SHOW_GEMMA_LICENSES.contains(model.name) &&
+              !tosViewModel.getIsGemmaTermsOfUseAccepted()
+          ) {
+            showGemmaTermsOfUseDialog = true
           } else {
-            Icons.AutoMirrored.Rounded.ArrowForward
-          },
-          contentDescription = null,
-          tint = textColor,
-        )
+            checkMemoryAndClickDownloadButton()
+          }
+        },
+      ) {
+        val textColor =
+          if (!enabled) {
+            // Define the color for disabled button.
+            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+          } else if (!downloadSucceeded && model.localFileRelativeDirPathOverride.isEmpty()) {
+            MaterialTheme.colorScheme.onSurface
+          } else if (task != null) {
+            Color.White
+          } else {
+            MaterialTheme.colorScheme.onPrimary
+          }
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Icon(
+            Icons.Outlined.FileDownload,
+            contentDescription = null,
+            tint = textColor,
+          )
 
-        if (!compact) {
-          if (needToDownloadFirst) {
+          if (!compact) {
             Text(
               stringResource(R.string.download),
               color = textColor,
               style = MaterialTheme.typography.titleMedium,
             )
-          } else if (canShowTryIt) {
-            Text(
-              stringResource(R.string.try_it),
-              color = textColor,
-              style = MaterialTheme.typography.titleMedium,
-              maxLines = 1,
-              autoSize =
-                TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 16.sp, stepSize = 1.sp),
-            )
           }
         }
       }
     }
-  }
-  // Download progress.
-  else {
-    curDownloadProgress =
-      downloadStatus!!.receivedBytes.toFloat() / downloadStatus.totalBytes.toFloat()
-    if (curDownloadProgress.isNaN()) {
-      curDownloadProgress = 0f
-    }
-    val animatedProgress = remember { Animatable(0f) }
+    ModelDownloadControlState.PROGRESS -> {
+      val receivedBytes = downloadStatus?.receivedBytes ?: 0L
+      val totalBytes = downloadStatus?.totalBytes ?: 0L
+      val curDownloadProgress =
+        if (totalBytes > 0) receivedBytes.toFloat() / totalBytes.toFloat() else 0f
+      val animatedProgress = remember { Animatable(0f) }
 
-    var downloadProgressModifier: Modifier = modifier
-    if (!compact) {
-      downloadProgressModifier = downloadProgressModifier.fillMaxWidth()
-    }
-    downloadProgressModifier =
-      downloadProgressModifier
-        .clip(CircleShape)
-        .background(MaterialTheme.colorScheme.surfaceContainer)
-        .padding(horizontal = 8.dp)
-        .height(42.dp)
-    Row(modifier = downloadProgressModifier, verticalAlignment = Alignment.CenterVertically) {
-      if (checkingToken) {
-        Text(
-          stringResource(R.string.checking_access),
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurface,
-          textAlign = TextAlign.Center,
-          modifier = if (!compact) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 4.dp),
-        )
-      } else {
-        Text(
-          "${(curDownloadProgress * 100).toInt()}%",
-          style =
-            MaterialTheme.typography.bodyMedium.copy(
-              // This stops numbers from "jumping around" when being updated.
-              fontFeatureSettings = "tnum"
-            ),
-          color = MaterialTheme.colorScheme.onSurface,
-          modifier = Modifier.padding(start = 12.dp).width(if (compact) 32.dp else 44.dp),
-        )
-        if (!compact) {
-          val color =
-            if (task != null) getTaskBgGradientColors(task = task)[1]
-            else MaterialTheme.colorScheme.primary
-          LinearProgressIndicator(
-            modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
-            progress = { animatedProgress.value },
-            color = color,
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+      var downloadProgressModifier: Modifier = modifier
+      if (!compact) {
+        downloadProgressModifier = downloadProgressModifier.fillMaxWidth()
+      }
+      downloadProgressModifier =
+        downloadProgressModifier
+          .clip(CircleShape)
+          .background(MaterialTheme.colorScheme.surfaceContainer)
+          .padding(horizontal = 8.dp)
+          .height(42.dp)
+      Row(modifier = downloadProgressModifier, verticalAlignment = Alignment.CenterVertically) {
+        if (checkingToken) {
+          Text(
+            stringResource(R.string.checking_access),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            modifier = if (!compact) Modifier.fillMaxWidth() else Modifier.padding(horizontal = 4.dp),
           )
-        }
-        val cbStop = stringResource(R.string.cd_stop_icon)
-        IconButton(
-          onClick = {
-            downloadStarted = false
-            modelManagerViewModel.cancelDownloadModel(model = model)
-          },
-          colors =
-            IconButtonDefaults.iconButtonColors(
-              containerColor = MaterialTheme.colorScheme.surfaceContainer
-            ),
-          modifier = Modifier.semantics { contentDescription = cbStop },
-        ) {
-          Icon(
-            Icons.Outlined.Close,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurface,
+        } else {
+          Text(
+            "${(curDownloadProgress * 100).toInt()}%",
+            style =
+              MaterialTheme.typography.bodyMedium.copy(
+                // This stops numbers from "jumping around" when being updated.
+                fontFeatureSettings = "tnum"
+              ),
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 12.dp).width(if (compact) 32.dp else 44.dp),
           )
+          if (!compact) {
+            val color =
+              if (task != null) getTaskBgGradientColors(task = task)[1]
+              else MaterialTheme.colorScheme.primary
+            LinearProgressIndicator(
+              modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
+              progress = { animatedProgress.value },
+              color = color,
+              trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
+          }
+          val cbStop = stringResource(R.string.cd_stop_icon)
+          IconButton(
+            onClick = {
+              downloadStarted = false
+              modelManagerViewModel.cancelDownloadModel(model = model)
+            },
+            colors =
+              IconButtonDefaults.iconButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
+              ),
+            modifier = Modifier.semantics { contentDescription = cbStop },
+          ) {
+            Icon(
+              Icons.Outlined.Close,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.onSurface,
+            )
+          }
         }
       }
+      LaunchedEffect(curDownloadProgress) {
+        animatedProgress.animateTo(curDownloadProgress, animationSpec = tween(150))
+      }
     }
-    LaunchedEffect(curDownloadProgress) {
-      animatedProgress.animateTo(curDownloadProgress, animationSpec = tween(150))
-    }
+    ModelDownloadControlState.NONE -> {}
   }
 
   // A ModalBottomSheet composable that displays information about the user agreement

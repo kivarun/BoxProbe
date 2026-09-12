@@ -103,6 +103,7 @@ fun SystemInfoScreen(
         )
 
         DeviceSection(snap)
+        BuildSection(viewModel.buildInfo)
         CpuMemorySection(snap)
         GpuSection(snap.gpu)
         VulkanSection(snap.vulkan)
@@ -161,6 +162,16 @@ private fun DeviceSection(snapshot: SystemInfoSnapshot) {
     InfoRow("Vendor match", matchLabel(d.vendorMatchStatus))
     InfoRow("Android", "${d.androidRelease} (API ${d.apiLevel})")
     InfoRow("Security patch", d.securityPatch)
+  }
+}
+
+@Composable
+private fun BuildSection(info: BuildInfoSnapshot) {
+  Section("Build") {
+    InfoRow("App version", "${info.versionName} (${info.versionCode})")
+    InfoRow("Git commit", info.gitCommit, monospace = true)
+    InfoRow("Package", info.applicationId, monospace = true)
+    InfoRow("Build type", info.buildType)
   }
 }
 
