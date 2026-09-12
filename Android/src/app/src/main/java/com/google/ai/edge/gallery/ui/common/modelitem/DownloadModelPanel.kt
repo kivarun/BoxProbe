@@ -59,7 +59,6 @@ fun DownloadModelPanel(
   isExpanded: Boolean,
   sharedTransitionScope: SharedTransitionScope,
   animatedVisibilityScope: AnimatedVisibilityScope,
-  onTryItClicked: () -> Unit,
   onBenchmarkClicked: () -> Unit,
   modifier: Modifier = Modifier,
   showBenchmarkButton: Boolean = false,
@@ -126,7 +125,6 @@ fun DownloadModelPanel(
         downloadStatus = downloadStatus,
         enabled = isDownloadButtonEnabled(downloadStatus, model),
         modelManagerViewModel = modelManagerViewModel,
-        onClicked = onTryItClicked,
         compact = !isExpanded,
         modifier =
           Modifier.sharedElement(

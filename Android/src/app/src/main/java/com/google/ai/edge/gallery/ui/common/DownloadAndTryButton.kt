@@ -130,7 +130,6 @@ fun DownloadAndTryButton(
   enabled: Boolean,
   downloadStatus: ModelDownloadStatus?,
   modelManagerViewModel: ModelManagerViewModel,
-  onClicked: () -> Unit,
   modifier: Modifier = Modifier,
   tosViewModel: TosViewModel = hiltViewModel(),
   modifierWhenExpanded: Modifier = Modifier,
@@ -329,16 +328,13 @@ fun DownloadAndTryButton(
           withContext(Dispatchers.Main) { startDownload(null) }
         }
       }
-      // No need to download. Directly open the model.
-      else {
-        withContext(Dispatchers.Main) { onClicked() }
-      }
+      // No need to download. Nothing to do (interactive try flow is removed).
     }
   }
 
   val checkMemoryAndClickDownloadButton = { handleClickButton() }
 
-  if (!showDownloadProgress) {
+  if (!showDownloadProgress && needToDownloadFirst) {
     var buttonModifier: Modifier = modifier.height(42.dp)
     if (!compact) {
       buttonModifier = buttonModifier.then(modifierWhenExpanded)

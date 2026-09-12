@@ -65,20 +65,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.navArgument
-import com.google.ai.edge.gallery.data.CustomTaskDataForBuiltinTask
-import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
-import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.data.isLegacyTasks
 import com.google.ai.edge.gallery.ui.benchmark.BenchmarkScreen
 import com.google.ai.edge.gallery.ui.home.HomeScreen
 import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
-import com.google.ai.edge.gallery.ui.modelmanager.ModelInitializationStatusType
-import com.google.ai.edge.gallery.ui.modelmanager.ModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -86,8 +80,6 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AGGalleryNavGraph"
 private const val ROUTE_HOMESCREEN = "homepage"
-private const val ROUTE_MODEL_LIST = "model_list"
-private const val ROUTE_MODEL = "route_model"
 private const val ROUTE_BENCHMARK = "benchmark"
 private const val ROUTE_MODEL_MANAGER = "model_manager"
 private const val ENTER_ANIMATION_DURATION_MS = 500
@@ -145,11 +137,7 @@ fun GalleryNavHost(
   modelManagerViewModel: ModelManagerViewModel,
 ) {
   val lifecycleOwner = LocalLifecycleOwner.current
-  var showModelManager by remember { mutableStateOf(false) }
-  var pickedTask by remember { mutableStateOf<Task?>(null) }
   var enableHomeScreenAnimation by remember { mutableStateOf(false) }
-  var enableModelListAnimation by remember { mutableStateOf(true) }
-  var lastNavigatedModelName = remember { "" }
 
   // Track whether app is in foreground.
   DisposableEffect(lifecycleOwner) {
@@ -187,116 +175,12 @@ fun GalleryNavHost(
           modelManagerViewModel = modelManagerViewModel,
           tosViewModel = hiltViewModel(),
           enableAnimation = enableHomeScreenAnimation,
-          navigateToTaskScreen = { task ->
-            pickedTask = task
-            enableModelListAnimation = true
-            navController.navigate(ROUTE_MODEL_LIST)
-          },
           onModelsClicked = { navController.navigate(ROUTE_MODEL_MANAGER) },
-          onNewChatClicked = {
-            val llmChatTask = modelManagerViewModel.getTaskById(BuiltInTaskId.LLM_CHAT)
-            val firstModel = llmChatTask?.models?.firstOrNull()
-            if (firstModel != null) {
-              lastNavigatedModelName = ""
-              navController.navigate("$ROUTE_MODEL/${BuiltInTaskId.LLM_CHAT}/${firstModel.name}?autoResume=false")
-            } else {
-              pickedTask = llmChatTask
-              navController.navigate(ROUTE_MODEL_LIST)
-            }
-          },
           onImportModelClicked = {
             navController.navigate("$ROUTE_MODEL_MANAGER?startImport=true")
           },
           gm4 = true,
         )
-      }
-    }
-
-    // Model list.
-    composable(
-      route = ROUTE_MODEL_LIST,
-      enterTransition = {
-        if (initialState.destination.route == ROUTE_HOMESCREEN) {
-          slideEnter()
-        } else {
-          EnterTransition.None
-        }
-      },
-      exitTransition = {
-        if (targetState.destination.route == ROUTE_HOMESCREEN) {
-          slideExit()
-        } else {
-          ExitTransition.None
-        }
-      },
-    ) {
-      pickedTask?.let {
-        ModelManager(
-          viewModel = modelManagerViewModel,
-          task = it,
-          enableAnimation = enableModelListAnimation,
-          onModelClicked = { model ->
-            navController.navigate("$ROUTE_MODEL/${it.id}/${model.name}")
-          },
-          navigateUp = {
-            enableHomeScreenAnimation = false
-            navController.navigateUp()
-          },
-        )
-      }
-    }
-
-    // Model page.
-    composable(
-      route = "$ROUTE_MODEL/{taskId}/{modelName}?conversationId={conversationId}&autoResume={autoResume}",
-      arguments =
-        listOf(
-          navArgument("taskId") { type = NavType.StringType },
-          navArgument("modelName") { type = NavType.StringType },
-          navArgument("conversationId") {
-            type = NavType.StringType
-            nullable = true
-            defaultValue = null
-          },
-          navArgument("autoResume") {
-            type = NavType.BoolType
-            defaultValue = true
-          },
-        ),
-      enterTransition = { slideEnter() },
-      exitTransition = { slideExit() },
-    ) { backStackEntry ->
-      val modelName = backStackEntry.arguments?.getString("modelName") ?: ""
-      val taskId = backStackEntry.arguments?.getString("taskId") ?: ""
-      val conversationId = backStackEntry.arguments?.getString("conversationId")
-      val autoResume = backStackEntry.arguments?.getBoolean("autoResume") ?: true
-      val scope = rememberCoroutineScope()
-      val context = LocalContext.current
-
-      modelManagerViewModel.getModelByName(name = modelName)?.let { initialModel ->
-        if (lastNavigatedModelName != modelName) {
-          modelManagerViewModel.selectModel(initialModel)
-          lastNavigatedModelName = modelName
-        }
-
-        val customTask = modelManagerViewModel.getCustomTaskByTaskId(id = taskId)
-        if (customTask != null) {
-          if (isLegacyTasks(customTask.task.id)) {
-            customTask.MainScreen(
-              data =
-                CustomTaskDataForBuiltinTask(
-                  modelManagerViewModel = modelManagerViewModel,
-                  onNavUp = {
-                    enableModelListAnimation = false
-                    lastNavigatedModelName = ""
-                    navController.navigateUp()
-                  },
-                  conversationId = conversationId,
-                  autoResumeConversation = autoResume,
-                )
-            )
-          }
-        }
       }
     }
 
@@ -308,8 +192,7 @@ fun GalleryNavHost(
       ),
       enterTransition = {
         if (
-          initialState.destination.route?.startsWith(ROUTE_BENCHMARK) == true ||
-            initialState.destination.route?.startsWith(ROUTE_MODEL) == true
+          initialState.destination.route?.startsWith(ROUTE_BENCHMARK) == true
         ) {
           null
         } else {
@@ -318,8 +201,7 @@ fun GalleryNavHost(
       },
       exitTransition = {
         if (
-          targetState.destination.route?.startsWith(ROUTE_BENCHMARK) == true ||
-            targetState.destination.route?.startsWith(ROUTE_MODEL) == true
+          targetState.destination.route?.startsWith(ROUTE_BENCHMARK) == true
         ) {
           null
         } else {
@@ -333,9 +215,6 @@ fun GalleryNavHost(
         navigateUp = {
           enableHomeScreenAnimation = false
           navController.navigateUp()
-        },
-        onModelSelected = { task, model ->
-          navController.navigate("$ROUTE_MODEL/${task.id}/${model.name}")
         },
         onBenchmarkClicked = { model ->
           navController.navigate("$ROUTE_BENCHMARK/${model.name}")
@@ -359,7 +238,6 @@ fun GalleryNavHost(
           initialModel = model,
           modelManagerViewModel = modelManagerViewModel,
           onBackClicked = {
-            enableModelListAnimation = false
             navController.navigateUp()
           },
         )
@@ -373,17 +251,7 @@ fun GalleryNavHost(
   if (data != null) {
     intent.data = null
     Log.d(TAG, "navigation link clicked: $data")
-    if (data.toString().startsWith("com.google.ai.edge.gallery://model/")) {
-      if (data.pathSegments.size >= 2) {
-        val taskId = data.pathSegments.get(data.pathSegments.size - 2)
-        val modelName = data.pathSegments.last()
-        modelManagerViewModel.getModelByName(name = modelName)?.let { model ->
-          navController.navigate("$ROUTE_MODEL/${taskId}/${model.name}")
-        }
-      } else {
-        Log.e(TAG, "Malformed deep link URI received: $data")
-      }
-    } else if (data.toString() == "com.google.ai.edge.gallery://global_model_manager") {
+    if (data.toString() == "com.google.ai.edge.gallery://global_model_manager") {
       navController.navigate(ROUTE_MODEL_MANAGER)
     }
   }

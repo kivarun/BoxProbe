@@ -28,13 +28,11 @@ import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.common.ProjectConfig
 import com.google.ai.edge.gallery.common.getJsonResponse
 import com.google.ai.edge.gallery.common.isAICoreSupported
-import com.google.ai.edge.gallery.data.CustomTask
 import com.google.ai.edge.gallery.data.Accelerator
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.CategoryInfo
 import com.google.ai.edge.gallery.data.Config
-import com.google.ai.edge.gallery.data.ConfigKey
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.DataStoreRepository
 import com.google.ai.edge.gallery.data.DownloadRepository
@@ -55,6 +53,7 @@ import com.google.ai.edge.gallery.proto.AccessTokenData
 import com.google.ai.edge.gallery.proto.ImportedModel
 import com.google.ai.edge.gallery.proto.Theme
 import com.google.ai.edge.gallery.runtime.aicore.AICoreModelHelper
+import com.google.ai.edge.gallery.runtime.runtimeHelper
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -123,9 +122,6 @@ data class ModelManagerUiState(
   /** A list of tasks available in the application. */
   val tasks: List<Task>,
 
-  /** Tasks grouped by category. */
-  val tasksByCategory: Map<String, List<Task>>,
-
   /** A map that tracks the download status of each model, indexed by model name. */
   val modelDownloadStatus: Map<String, ModelDownloadStatus>,
 
@@ -158,14 +154,6 @@ data class ModelManagerUiState(
   }
 }
 
-private val PREDEFINED_LLM_TASK_ORDER =
-  listOf(
-    BuiltInTaskId.LLM_ASK_IMAGE,
-    BuiltInTaskId.LLM_ASK_AUDIO,
-    BuiltInTaskId.LLM_CHAT,
-    BuiltInTaskId.LLM_PROMPT_LAB,
-  )
-
 /**
  * ViewModel responsible for managing models, their download status, and initialization.
  *
@@ -180,12 +168,47 @@ constructor(
   private val downloadRepository: DownloadRepository,
   val dataStoreRepository: DataStoreRepository,
   private val lifecycleProvider: AppLifecycleProvider,
-  private val customTasks: Set<@JvmSuppressWildcards CustomTask>,
   @ApplicationContext private val context: Context,
 ) : ViewModel() {
   private val externalFilesDir = context.getExternalFilesDir(null)
   protected val _uiState = MutableStateFlow(createEmptyUiState())
   val uiState = _uiState.asStateFlow()
+
+  /** Built-in LLM tasks that carry the allowlist/import models. */
+  private val tasks: List<Task> = createBuiltinTasks()
+
+  /** Creates the built-in LLM tasks used to hold and route models. */
+  private fun createBuiltinTasks(): List<Task> =
+    listOf(
+      Task(
+        id = BuiltInTaskId.LLM_CHAT,
+        label = "AI Chat",
+        category = Category.LLM,
+        models = mutableListOf(),
+        description = "Chat with on-device large language models",
+      ),
+      Task(
+        id = BuiltInTaskId.LLM_PROMPT_LAB,
+        label = "Prompt Lab",
+        category = Category.LLM,
+        models = mutableListOf(),
+        description = "Run single-turn prompts with on-device LLMs",
+      ),
+      Task(
+        id = BuiltInTaskId.LLM_ASK_IMAGE,
+        label = "Ask Image",
+        category = Category.LLM,
+        models = mutableListOf(),
+        description = "Chat with LLMs using image inputs",
+      ),
+      Task(
+        id = BuiltInTaskId.LLM_ASK_AUDIO,
+        label = "Ask Audio",
+        category = Category.LLM,
+        models = mutableListOf(),
+        description = "Chat with LLMs using audio inputs",
+      ),
+    )
 
   val authService = AuthorizationService(context)
   var curAccessToken: String = ""
@@ -201,15 +224,6 @@ constructor(
   fun getTasksByIds(ids: Set<String>): List<Task> {
     return uiState.value.tasks.filter { ids.contains(it.id) }
   }
-
-  fun getCustomTaskByTaskId(id: String): CustomTask? {
-    return getActiveCustomTasks().find { it.task.id == id }
-  }
-
-  fun getActiveCustomTasks(): List<CustomTask> {
-    return customTasks.toList()
-  }
-
   fun getSelectedModel(): Model? {
     return uiState.value.selectedModel
   }
@@ -243,7 +257,7 @@ constructor(
   }
 
   fun processTasks() {
-    val curTasks = getActiveCustomTasks().map { it.task }
+    val curTasks = tasks
     for (task in curTasks) {
       for (model in task.models) {
         model.preProcess()
@@ -378,7 +392,6 @@ constructor(
 
   fun initializeModel(
     context: Context,
-    task: Task,
     model: Model,
     force: Boolean = false,
     onDone: () -> Unit = {},
@@ -402,7 +415,7 @@ constructor(
       }
 
       // Clean up.
-      cleanupModel(context = context, task = task, model = model)
+      cleanupModel(context = context, model = model)
 
       // Start initialization.
       Log.d(TAG, "Initializing model '${model.name}'...")
@@ -422,7 +435,7 @@ constructor(
           )
           if (model.cleanUpAfterInit) {
             Log.d(TAG, "Model '${model.name}' needs cleaning up after init.")
-            cleanupModel(context = context, task = task, model = model)
+            cleanupModel(context = context, model = model)
           }
           onDone()
         } else if (error.isNotEmpty()) {
@@ -435,20 +448,20 @@ constructor(
         }
       }
 
-      // Call the model initialization function.
-      getCustomTaskByTaskId(id = task.id)
-        ?.initializeModelFn(
-          context = context,
-          coroutineScope = viewModelScope,
-          model = model,
-          onDone = onDoneFn,
-        )
+      // Initialize through the runtime helper selected by the model's runtime type.
+      model.runtimeHelper.initialize(
+        context = context,
+        model = model,
+        supportImage = model.llmSupportImage,
+        supportAudio = model.llmSupportAudio,
+        onDone = onDoneFn,
+        coroutineScope = viewModelScope,
+      )
     }
   }
 
   fun cleanupModel(
     context: Context,
-    task: Task,
     model: Model,
     instanceToCleanUp: Any? = model.instance,
     onDone: () -> Unit = {},
@@ -472,13 +485,7 @@ constructor(
         Log.d(TAG, "Clean up model '${model.name}' done")
         onDone()
       }
-      getCustomTaskByTaskId(id = task.id)
-        ?.cleanUpModelFn(
-          context = context,
-          coroutineScope = viewModelScope,
-          model = model,
-          onDone = onDoneFn,
-        )
+      model.runtimeHelper.cleanUp(model = model, onDone = onDoneFn)
     } else {
       // When model is being initialized and we are trying to clean it up at same time, we mark it
       // to clean up and it will be cleaned up after initialization is done.
@@ -907,7 +914,7 @@ constructor(
         }
 
         // Convert models in the allowlist.
-        val curTasks = getActiveCustomTasks().map { it.task }
+        val curTasks = tasks
         val nameToModel = mutableMapOf<String, Model>()
         for (allowedModel in modelAllowlist.models) {
           if (allowedModel.disabled == true) {
@@ -971,7 +978,6 @@ constructor(
             .copy(
               loadingModelAllowlist = false,
               tasks = curTasks,
-              tasksByCategory = groupTasksByCategory(),
             )
         }
 
@@ -993,7 +999,7 @@ constructor(
   }
 
   fun clearLoadModelAllowlistError() {
-    val curTasks = getActiveCustomTasks().map { it.task }
+    val curTasks = tasks
     processTasks()
     _uiState.update {
       createUiState()
@@ -1001,7 +1007,6 @@ constructor(
           loadingModelAllowlist = false,
           tasks = curTasks,
           loadingModelAllowlistError = "",
-          tasksByCategory = groupTasksByCategory(),
         )
     }
   }
@@ -1071,7 +1076,6 @@ constructor(
   private fun createEmptyUiState(): ModelManagerUiState {
     return ModelManagerUiState(
       tasks = listOf(),
-      tasksByCategory = mapOf(),
       modelDownloadStatus = mapOf(),
       modelInitializationStatus = mapOf(),
     )
@@ -1080,11 +1084,8 @@ constructor(
   private fun createUiState(): ModelManagerUiState {
     val modelDownloadStatus: MutableMap<String, ModelDownloadStatus> = mutableMapOf()
     val modelInstances: MutableMap<String, ModelInitializationStatus> = mutableMapOf()
-    val tasks: MutableMap<String, Task> = mutableMapOf()
     val checkedModelNames = mutableSetOf<String>()
-    for (customTask in getActiveCustomTasks()) {
-      val task = customTask.task
-      tasks.put(key = task.id, value = task)
+    for (task in tasks) {
       for (model in task.models) {
         if (checkedModelNames.contains(model.name)) {
           continue
@@ -1104,13 +1105,14 @@ constructor(
       val model = createModelFromImportedModelInfo(info = importedModel)
 
       // Add to task.
-      tasks.get(key = BuiltInTaskId.LLM_CHAT)?.models?.add(model)
-      tasks.get(key = BuiltInTaskId.LLM_PROMPT_LAB)?.models?.add(model)
+      for (task in getTasksByIds(ids = setOf(BuiltInTaskId.LLM_CHAT, BuiltInTaskId.LLM_PROMPT_LAB))) {
+        task.models.add(model)
+      }
       if (model.llmSupportImage) {
-        tasks.get(key = BuiltInTaskId.LLM_ASK_IMAGE)?.models?.add(model)
+        getTasksByIds(ids = setOf(BuiltInTaskId.LLM_ASK_IMAGE)).forEach { it.models.add(model) }
       }
       if (model.llmSupportAudio) {
-        tasks.get(key = BuiltInTaskId.LLM_ASK_AUDIO)?.models?.add(model)
+        getTasksByIds(ids = setOf(BuiltInTaskId.LLM_ASK_AUDIO)).forEach { it.models.add(model) }
       }
 
       // Update status.
@@ -1127,8 +1129,7 @@ constructor(
 
     Log.d(TAG, "model download status: $modelDownloadStatus")
     return ModelManagerUiState(
-      tasks = getActiveCustomTasks().map { it.task }.toList(),
-      tasksByCategory = mapOf(),
+      tasks = tasks.toList(),
       modelDownloadStatus = modelDownloadStatus,
       modelInitializationStatus = modelInstances,
       textInputHistory = textInputHistory,
@@ -1189,62 +1190,6 @@ constructor(
     return model
   }
 
-  private fun groupTasksByCategory(): Map<String, List<Task>> {
-    val tasks = getActiveCustomTasks().map { it.task }
-
-    val categoryMap: Map<String, CategoryInfo> =
-      tasks.associateBy { it.category.id }.mapValues { it.value.category }
-
-    val groupedTasks = tasks.groupBy { it.category.id }
-    val groupedSortedTasks: MutableMap<String, List<Task>> = mutableMapOf()
-    // Sort the tasks in categories by pre-defined order. Sort other tasks by label.
-    for (categoryId in groupedTasks.keys) {
-      val sortedTasks =
-        groupedTasks[categoryId]!!.sortedWith { a, b ->
-          if (categoryId == Category.LLM.id) {
-            val order: List<String> =
-              when (categoryId) {
-                Category.LLM.id -> PREDEFINED_LLM_TASK_ORDER
-                else -> listOf()
-              }
-            val indexA = order.indexOf(a.id)
-            val indexB = order.indexOf(b.id)
-            if (indexA != -1 && indexB != -1) {
-              indexA.compareTo(indexB)
-            } else if (indexA != -1) {
-              -1
-            } else if (indexB != -1) {
-              1
-            } else {
-              val ca = categoryMap[a.id]!!
-              val cb = categoryMap[b.id]!!
-              val caLabel = getCategoryLabel(context = context, category = ca)
-              val cbLabel = getCategoryLabel(context = context, category = cb)
-              caLabel.compareTo(cbLabel)
-            }
-          } else {
-            a.label.compareTo(b.label)
-          }
-        }
-      for ((index, task) in sortedTasks.withIndex()) {
-        task.index = index
-      }
-      groupedSortedTasks[categoryId] = sortedTasks
-    }
-
-    return groupedSortedTasks
-  }
-
-  private fun getCategoryLabel(context: Context, category: CategoryInfo): String {
-    val stringRes = category.labelStringRes
-    val label = category.label
-    if (stringRes != null) {
-      return context.getString(stringRes)
-    } else if (label != null) {
-      return label
-    }
-    return context.getString(R.string.category_unlabeled)
-  }
 
   /**
    * Retrieves the download status of a model.

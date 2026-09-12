@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.google.ai.edge.gallery.ui.llmchat
+package com.google.ai.edge.gallery.runtime
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -28,9 +28,6 @@ import com.google.ai.edge.gallery.data.DEFAULT_TOPK
 import com.google.ai.edge.gallery.data.DEFAULT_TOPP
 import com.google.ai.edge.gallery.data.DEFAULT_VISION_ACCELERATOR
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.runtime.CleanUpListener
-import com.google.ai.edge.gallery.runtime.LlmModelHelper
-import com.google.ai.edge.gallery.runtime.ResultListener
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents

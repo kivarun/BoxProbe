@@ -49,9 +49,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,8 +57,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
 import androidx.compose.material.icons.rounded.Error
-import androidx.compose.material.icons.rounded.Forum
-import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Settings
@@ -125,10 +120,8 @@ import com.google.ai.edge.gallery.data.AppBarActionType
 import com.google.ai.edge.gallery.data.BuiltInTaskId
 import com.google.ai.edge.gallery.data.Category
 import com.google.ai.edge.gallery.data.CategoryInfo
-import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.ui.common.RevealingText
 import com.google.ai.edge.gallery.ui.common.SwipingText
-import com.google.ai.edge.gallery.ui.common.TaskIcon
 import com.google.ai.edge.gallery.ui.common.buildTrackableUrlAnnotatedString
 import com.google.ai.edge.gallery.ui.common.rememberDelayedAnimationProgress
 import com.google.ai.edge.gallery.ui.common.tos.AppTosDialog
@@ -159,16 +152,12 @@ private object HomeScreenDestination {
   @StringRes val titleRes = R.string.app_name
 }
 
-private val PREDEFINED_CATEGORY_ORDER = listOf(Category.LLM.id, Category.EXPERIMENTAL.id)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
   modelManagerViewModel: ModelManagerViewModel,
   tosViewModel: TosViewModel,
-  navigateToTaskScreen: (Task) -> Unit,
   onModelsClicked: () -> Unit,
-  onNewChatClicked: () -> Unit = {},
   onImportModelClicked: () -> Unit = {},
   enableAnimation: Boolean,
   modifier: Modifier = Modifier,
@@ -180,41 +169,6 @@ fun HomeScreen(
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
   val isDevBuild = context.packageName.endsWith(".dev")
-
-  var tasks = uiState.tasks
-
-  val categoryMap: Map<String, CategoryInfo> =
-    remember(tasks) { tasks.associateBy { it.category.id }.mapValues { it.value.category } }
-  val sortedCategories =
-    remember(categoryMap) {
-      categoryMap.keys
-        .toList()
-        .sortedWith { a, b ->
-          val indexA = PREDEFINED_CATEGORY_ORDER.indexOf(a)
-          val indexB = PREDEFINED_CATEGORY_ORDER.indexOf(b)
-          // Check if both categories are in the predefined order
-          if (indexA != -1 && indexB != -1) {
-            indexA.compareTo(indexB)
-          }
-          // Check if only category 'a' is in the predefined order
-          else if (indexA != -1) {
-            -1
-          }
-          // Check if only category 'b' is in the predefined order
-          else if (indexB != -1) {
-            1
-          }
-          // If neither is in the predefined order, sort by label
-          else {
-            val ca = categoryMap[a]!!
-            val cb = categoryMap[b]!!
-            val caLabel = getCategoryLabel(context = context, category = ca)
-            val cbLabel = getCategoryLabel(context = context, category = cb)
-            caLabel.compareTo(cbLabel)
-          }
-        }
-        .map { categoryMap[it]!! }
-    }
 
   // Show home screen content when TOS has been accepted.
   if (!showTosDialog) {
@@ -440,8 +394,6 @@ fun HomeScreen(
               }
 
               Column(modifier = Modifier.fillMaxWidth()) {
-                var selectedCategoryIndex by remember { mutableIntStateOf(0) }
-
                 // App intro text (Title removed as per request).
                 Column(
                   modifier =
@@ -469,18 +421,6 @@ fun HomeScreen(
                   horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                   FilledTonalButton(
-                    onClick = onNewChatClicked,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                  ) {
-                    Icon(
-                      Icons.Rounded.AddComment,
-                      contentDescription = null,
-                      modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("New Chat", maxLines = 1)
-                  }
-                  FilledTonalButton(
                     onClick = onImportModelClicked,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -501,40 +441,6 @@ fun HomeScreen(
                     }
                   }
                 }
-
-                // Tab header for categories.
-                //
-                // synchronizes the `pagerState` and the `selectedCategoryIndex` to ensure that
-                //  both the tab header and the task list always show the correct category and page.
-                val pagerState = rememberPagerState(pageCount = { sortedCategories.size })
-                LaunchedEffect(pagerState.settledPage) {
-                  selectedCategoryIndex = pagerState.settledPage
-                }
-                if (sortedCategories.size > 1) {
-                  CategoryTabHeader(
-                    sortedCategories = sortedCategories,
-                    selectedIndex = selectedCategoryIndex,
-                    enableAnimation = enableAnimation,
-                    onCategorySelected = { index ->
-                      selectedCategoryIndex = index
-                      scope.launch { pagerState.animateScrollToPage(page = index) }
-                    },
-                  )
-                }
-
-                // Task list in a horizontal pager. Each page shows the list of tasks for the
-                // category.
-                val grid = gm4
-                TaskList(
-                  modelManagerViewModel = modelManagerViewModel,
-                  pagerState = pagerState,
-                  sortedCategories = sortedCategories,
-                  tasksByCategories = uiState.tasksByCategory,
-                  enableAnimation = enableAnimation,
-                  navigateToTaskScreen = navigateToTaskScreen,
-                  gm4 = gm4,
-                  grid = grid,
-                )
 
                 Spacer(modifier = Modifier.height(innerPadding.calculateBottomPadding() + 10.dp))
               }
@@ -705,368 +611,4 @@ private fun IntroText(enableAnimation: Boolean, gm4: Boolean) {
 @Composable
 private fun TryGm4IntroText(enableAnimation: Boolean) {
   // Placeholder for Box app
-}
-
-@Composable
-private fun CategoryTabHeader(
-  sortedCategories: List<CategoryInfo>,
-  selectedIndex: Int,
-  enableAnimation: Boolean,
-  onCategorySelected: (Int) -> Unit,
-) {
-  val context = LocalContext.current
-  val scope = rememberCoroutineScope()
-  val listState = rememberLazyListState()
-
-  val progress =
-    if (!enableAnimation) 1f
-    else
-      rememberDelayedAnimationProgress(
-        initialDelay = TASK_LIST_ANIMATION_START,
-        animationDurationMs = CONTENT_COMPOSABLES_ANIMATION_DURATION,
-        animationLabel = "task card animation",
-      )
-
-  LazyRow(
-    state = listState,
-    modifier =
-      Modifier.fillMaxWidth().padding(bottom = 32.dp).graphicsLayer {
-        alpha = progress
-        translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-      },
-    horizontalArrangement = Arrangement.spacedBy(16.dp),
-  ) {
-    item(key = "spacer_start") { Spacer(modifier = Modifier.width(8.dp)) }
-    itemsIndexed(items = sortedCategories) { index, category ->
-      Row(
-        modifier =
-          Modifier.height(40.dp)
-            .clip(CircleShape)
-            .background(
-              color =
-                if (selectedIndex == index) MaterialTheme.customColors.tabHeaderBgColor
-                else Color.Transparent
-            )
-            .clickable {
-              onCategorySelected(index)
-
-              // Scroll to clicked item when the item is not fully inside view.
-              scope.launch {
-                val visibleItems = listState.layoutInfo.visibleItemsInfo
-                val targetItem = visibleItems.find {
-                  // +1 because the first item is the item keyed at spacer_start.
-                  it.index == index + 1
-                }
-                if (
-                  targetItem == null ||
-                    targetItem.offset < 0 ||
-                    targetItem.offset + targetItem.size > listState.layoutInfo.viewportSize.width
-                ) {
-                  listState.animateScrollToItem(index = index)
-                }
-              }
-            },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-      ) {
-        Text(
-          getCategoryLabel(context = context, category = category),
-          modifier = Modifier.padding(horizontal = 16.dp),
-          style = MaterialTheme.typography.labelLarge,
-          color =
-            if (selectedIndex == index) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-      }
-    }
-    item(key = "spacer_end") { Spacer(modifier = Modifier.width(8.dp)) }
-  }
-}
-
-@Composable
-private fun TaskList(
-  modelManagerViewModel: ModelManagerViewModel,
-  pagerState: PagerState,
-  sortedCategories: List<CategoryInfo>,
-  tasksByCategories: Map<String, List<Task>>,
-  enableAnimation: Boolean,
-  navigateToTaskScreen: (Task) -> Unit,
-  gm4: Boolean = false,
-  grid: Boolean = false,
-) {
-  // Model list animation:
-  //
-  // 1.  Slide Up: The entire column of task cards translates upwards,
-  // 2.  Fade in one by one: The task card fade in one by one. See TaskCard for details.
-  val progress =
-    if (!enableAnimation) 1f
-    else
-      rememberDelayedAnimationProgress(
-        initialDelay = TASK_LIST_ANIMATION_START,
-        animationDurationMs = CONTENT_COMPOSABLES_ANIMATION_DURATION,
-        animationLabel = "task card animation",
-      )
-
-  // Tracks when the initial animation is done.
-  //
-  var initialAnimationDone by remember { mutableStateOf(false) }
-  LaunchedEffect(Unit) {
-    // Use 5 iterations to make sure all visible task cards are animated.
-    delay(((TASK_CARD_ANIMATION_DURATION + TASK_CARD_ANIMATION_DELAY_OFFSET) * 5).toLong())
-    initialAnimationDone = true
-  }
-
-  HorizontalPager(
-    state = pagerState,
-    verticalAlignment = Alignment.Top,
-    contentPadding = PaddingValues(horizontal = 20.dp),
-  ) { pageIndex ->
-    val tasks = tasksByCategories[sortedCategories[pageIndex].id]!!
-    if (grid) {
-      Column(
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier =
-          Modifier.fillMaxWidth().padding(4.dp).graphicsLayer {
-            translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-          },
-      ) {
-        for (i in tasks.indices step 2) {
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-          ) {
-            // First item in the row
-            TaskCard(
-              task = tasks[i],
-              index = i,
-              animate =
-                (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-              onClick = { navigateToTaskScreen(tasks[i]) },
-              modifier = Modifier.weight(1f),
-              square = true,
-            )
-
-            // Second item in the row, if it exists
-            if (i + 1 < tasks.size) {
-              TaskCard(
-                task = tasks[i + 1],
-                index = i + 1,
-                animate =
-                  (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-                onClick = { navigateToTaskScreen(tasks[i + 1]) },
-                modifier = Modifier.weight(1f),
-                square = true,
-              )
-            } else {
-              // Add a spacer to fill the remaining space if there's only one item in the last row
-              Spacer(modifier = Modifier.weight(1f))
-            }
-          }
-        }
-      }
-    } else {
-      Column(
-        modifier =
-          Modifier.fillMaxWidth().padding(4.dp).graphicsLayer {
-            translationY = (CONTENT_COMPOSABLES_OFFSET_Y.dp * (1 - progress)).toPx()
-          },
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-      ) {
-        for ((index, task) in tasks.withIndex()) {
-          TaskCard(
-            task = task,
-            index = index,
-            animate =
-              (pageIndex == 0 || pageIndex == 1) && !initialAnimationDone && enableAnimation,
-            onClick = { navigateToTaskScreen(task) },
-            modifier = Modifier.fillMaxWidth(),
-            square = false,
-          )
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun TaskCard(
-  task: Task,
-  index: Int,
-  animate: Boolean,
-  onClick: () -> Unit,
-  modifier: Modifier = Modifier,
-  description: String = "",
-  square: Boolean = false,
-) {
-  // Observes the model count and updates the model count label with a fade-in/fade-out animation
-  // whenever the count changes.
-  val modelCount by remember {
-    derivedStateOf {
-      val trigger = task.updateTrigger.value
-      if (trigger >= 0) {
-        task.models.size
-      } else {
-        0
-      }
-    }
-  }
-  val modelCountLabel by remember {
-    derivedStateOf {
-      when (modelCount) {
-        1 -> "1 Model"
-        else -> "%d Models".format(modelCount)
-      }
-    }
-  }
-  var curModelCountLabel by remember { mutableStateOf("") }
-  var modelCountLabelVisible by remember { mutableStateOf(true) }
-
-  LaunchedEffect(modelCountLabel) {
-    if (curModelCountLabel.isEmpty()) {
-      curModelCountLabel = modelCountLabel
-    } else {
-      modelCountLabelVisible = false
-      delay(TASK_COUNT_ANIMATION_DURATION.toLong())
-      curModelCountLabel = modelCountLabel
-      modelCountLabelVisible = true
-    }
-  }
-
-  // Task card animation:
-  //
-  // This animation makes the task cards appear with a delayed fade-in effect. Each card will become
-  // visible sequentially, starting after an initial delay and then with an additional offset for
-  // subsequent cards.
-  val progress =
-    if (animate)
-      rememberDelayedAnimationProgress(
-        initialDelay = TASK_LIST_ANIMATION_START + index * TASK_CARD_ANIMATION_DELAY_OFFSET,
-        animationDurationMs = TASK_CARD_ANIMATION_DURATION,
-        animationLabel = "task card animation",
-      )
-    else 1f
-
-  val cbTask = stringResource(R.string.cd_task_card, task.label, task.models.size)
-  Card(
-    modifier =
-      modifier
-        .clip(RoundedCornerShape(24.dp))
-        .clickable(onClick = onClick)
-        .graphicsLayer { alpha = progress }
-        .semantics { contentDescription = cbTask },
-    colors =
-      CardDefaults.cardColors(
-        containerColor =
-          if (description.isNotEmpty() || square) {
-            MaterialTheme.colorScheme.surfaceContainer
-          } else {
-
-            MaterialTheme.customColors.taskCardBgColor
-          }
-      ),
-  ) {
-    if (square) {
-      Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-      ) {
-        TaskIcon(task = task, width = 40.dp)
-        Column() {
-          Text(
-            curModelCountLabel,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp),
-            modifier = Modifier.clearAndSetSemantics {},
-          )
-          Text(
-            task.label,
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.titleMedium,
-          )
-          Text(
-            task.shortDescription,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 14.sp),
-            modifier = Modifier.clearAndSetSemantics {},
-            minLines = 2,
-            maxLines = 2,
-            autoSize =
-              TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 12.sp, stepSize = 1.sp),
-          )
-        }
-      }
-    } else {
-      Row(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 20.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        if (description.isNotEmpty()) {
-          // Icon.
-          TaskIcon(task = task, width = 40.dp)
-
-          // Title and description.
-          Column(modifier = Modifier.weight(1f).padding(start = 16.dp)) {
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-              Text(
-                task.label,
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
-              )
-              // Removed "New" badge from agentic skills features
-            }
-            Text(
-              description,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              style =
-                MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 15.sp),
-              modifier = Modifier.clearAndSetSemantics {},
-            )
-          }
-        } else {
-          // Title and model count
-          Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(
-                task.label,
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.titleMedium,
-              )
-              if (task.experimental) {
-                Icon(
-                  painter = painterResource(R.drawable.ic_experiment),
-                  contentDescription = "Experimental",
-                  modifier = Modifier.size(20.dp).padding(start = 4.dp),
-                  tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-              }
-            }
-            Text(
-              curModelCountLabel,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              style = MaterialTheme.typography.bodyMedium,
-              modifier = Modifier.clearAndSetSemantics {},
-            )
-          }
-
-          // Icon.
-          TaskIcon(task = task, width = 40.dp)
-        }
-      }
-    }
-  }
-}
-
-private fun getCategoryLabel(context: Context, category: CategoryInfo): String {
-  val stringRes = category.labelStringRes
-  val label = category.label
-  if (stringRes != null) {
-    return context.getString(stringRes)
-  } else if (label != null) {
-    return label
-  }
-  return context.getString(R.string.category_unlabeled)
 }

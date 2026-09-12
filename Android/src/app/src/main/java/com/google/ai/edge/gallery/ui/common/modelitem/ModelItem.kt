@@ -73,7 +73,6 @@ fun ModelItem(
   model: Model,
   task: Task?,
   modelManagerViewModel: ModelManagerViewModel,
-  onModelClicked: (Model) -> Unit,
   onBenchmarkClicked: (Model) -> Unit,
   modifier: Modifier = Modifier,
   expanded: Boolean? = null,
@@ -105,8 +104,6 @@ fun ModelItem(
           if (!model.imported) {
             isExpanded = !isExpanded
             onExpanded(isExpanded)
-          } else if (!showBenchmarkButton) {
-            onModelClicked(model)
           }
         },
         interactionSource = remember { MutableInteractionSource() },
@@ -187,7 +184,6 @@ fun ModelItem(
                 .padding(top = if (targetState) 12.dp else 0.dp),
             modelManagerViewModel = modelManagerViewModel,
             isExpanded = targetState,
-            onTryItClicked = { onModelClicked(model) },
             onBenchmarkClicked = { onBenchmarkClicked(model) },
             showBenchmarkButton = showBenchmarkButton,
           )

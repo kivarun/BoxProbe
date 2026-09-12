@@ -91,7 +91,6 @@ import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.data.Task
 import com.google.ai.edge.gallery.proto.ImportedModel
-import com.google.ai.edge.gallery.ui.common.TaskIcon
 import com.google.ai.edge.gallery.ui.common.modelitem.ModelItem
 import kotlin.text.endsWith
 import kotlin.text.lowercase
@@ -105,7 +104,6 @@ private const val TAG = "AGGlobalMM"
 fun GlobalModelManager(
   viewModel: ModelManagerViewModel,
   navigateUp: () -> Unit,
-  onModelSelected: (Task, Model) -> Unit,
   onBenchmarkClicked: (Model) -> Unit,
   modifier: Modifier = Modifier,
   startImport: Boolean = false,
@@ -113,9 +111,6 @@ fun GlobalModelManager(
   val uiState by viewModel.uiState.collectAsState()
   val builtInModels = remember { mutableStateListOf<Model>() }
   val importedModels = remember { mutableStateListOf<Model>() }
-  val taskCandidates = remember { mutableStateListOf<Task>() }
-  var modelForTaskCandidate by remember { mutableStateOf<Model?>(null) }
-  var showTaskSelectorBottomSheet by remember { mutableStateOf(false) }
   var showImportModelSheet by remember { mutableStateOf(false) }
   var showUnsupportedFileTypeDialog by remember { mutableStateOf(false) }
   var showUnsupportedWebModelDialog by remember { mutableStateOf(false) }
@@ -176,23 +171,6 @@ fun GlobalModelManager(
     builtInModels.addAll(sortedModels.filter { !it.imported })
     importedModels.clear()
     importedModels.addAll(sortedModels.filter { it.imported })
-  }
-
-  val handleClickModel: (Model) -> Unit = { model ->
-    val tasks = viewModel.uiState.value.tasks
-    val tasksForModel = tasks.filter { task -> task.models.any { it.name == model.name } }
-    // If there is only one task for the model, navigate to the model directly.
-    if (tasksForModel.size == 1) {
-      onModelSelected(tasksForModel[0], model)
-    }
-    // If there are multiple tasks for the model, show a bottom sheet for the user to choose which
-    // task to use.
-    else if (tasksForModel.size > 1) {
-      taskCandidates.clear()
-      taskCandidates.addAll(tasksForModel)
-      modelForTaskCandidate = model
-      showTaskSelectorBottomSheet = true
-    }
   }
 
   // Handle system's edge swipe.
@@ -284,7 +262,6 @@ fun GlobalModelManager(
             model = model,
             task = null,
             modelManagerViewModel = viewModel,
-            onModelClicked = handleClickModel,
             onBenchmarkClicked = onBenchmarkClicked,
             expanded = expanded,
             showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
@@ -308,7 +285,6 @@ fun GlobalModelManager(
             model = model,
             task = null,
             modelManagerViewModel = viewModel,
-            onModelClicked = handleClickModel,
             onBenchmarkClicked = onBenchmarkClicked,
             expanded = true,
             showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
@@ -333,51 +309,6 @@ fun GlobalModelManager(
             )
             .align(Alignment.BottomCenter)
       )
-    }
-  }
-
-  if (showTaskSelectorBottomSheet) {
-    ModalBottomSheet(
-      onDismissRequest = { showTaskSelectorBottomSheet = false },
-      sheetState = sheetState,
-    ) {
-      Column(
-        modifier = Modifier.padding(bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        Text(
-          stringResource(R.string.model_manager_select_task_title),
-          color = MaterialTheme.colorScheme.onSurface,
-          style = MaterialTheme.typography.titleLarge,
-          modifier = Modifier.padding(bottom = 8.dp).padding(start = 16.dp),
-        )
-        for (task in taskCandidates) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier =
-              Modifier.fillMaxWidth()
-                .clickable {
-                  val model = modelForTaskCandidate
-                  if (model != null) {
-                    onModelSelected(task, model)
-                  }
-                  scope.launch {
-                    sheetState.hide()
-                    showTaskSelectorBottomSheet = false
-                  }
-                }
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-          ) {
-            Text(
-              task.label,
-              color = MaterialTheme.colorScheme.onSurface,
-              style = MaterialTheme.typography.titleMedium,
-            )
-            TaskIcon(task = task, width = 40.dp)
-          }
-        }
-      }
     }
   }
 
