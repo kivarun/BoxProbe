@@ -122,10 +122,18 @@ android {
   // NPU backend resolves vendor dispatch libraries relative to `nativeLibraryDir`.
   // Groovy-style dynamic invocation: the legacy (android.newDsl=false) decorated
   // extension rejects the statically typed Kotlin DSL lambdas.
+  // Diagnostic UAT: the two foreign dispatch runtimes are excluded from the APK so
+  // LiteRT cannot pick them; MediaTek dispatch remains the only dispatch runtime.
   withGroovyBuilder {
     "packagingOptions" {
       "jniLibs" {
         "setUseLegacyPackaging"(true)
+        "setExcludes"(
+          setOf(
+            "**/libLiteRtDispatch_GoogleTensor.so",
+            "**/libLiteRtDispatch_Qualcomm.so",
+          )
+        )
       }
     }
   }
