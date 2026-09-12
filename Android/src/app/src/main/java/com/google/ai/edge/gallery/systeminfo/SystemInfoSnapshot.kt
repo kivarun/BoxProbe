@@ -148,8 +148,12 @@ data class NativeLibrariesSnapshot(
   val htpGenerations: List<String>,
   /** LiteRT vendor labels seen in dispatch libraries, e.g. ["MediaTek", "Qualcomm", "GoogleTensor"]. */
   val liteRtVendorLabels: List<String>,
-  /** Number of .so files scanned in total. */
+  /** Number of unique .so library names found in package archives. */
   val totalScanned: Int,
+  /** Number of package archives (base + splits) scanned. */
+  val archivesScanned: Int,
+  /** Non-fatal warnings collected while reading archives. */
+  val diagnostics: List<String>,
   val errorDetail: String?,
 ) {
   companion object {
@@ -162,6 +166,8 @@ data class NativeLibrariesSnapshot(
       htpGenerations = emptyList(),
       liteRtVendorLabels = emptyList(),
       totalScanned = 0,
+      archivesScanned = 0,
+      diagnostics = emptyList(),
       errorDetail = detail,
     )
   }

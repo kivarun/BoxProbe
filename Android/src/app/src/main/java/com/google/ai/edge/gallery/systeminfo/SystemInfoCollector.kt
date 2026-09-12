@@ -16,7 +16,6 @@ object SystemInfoCollector {
 
   private const val FEATURE_VULKAN_VERSION = "android.hardware.vulkan.version"
   private const val FEATURE_VULKAN_LEVEL = "android.hardware.vulkan.level"
-  private const val VULKAN_COMPUTE_MAGIC = 20150324
 
   fun collect(context: Context): SystemInfoSnapshot {
     val device = collectDevice(context)
@@ -125,18 +124,48 @@ object SystemInfoCollector {
     }
   }
 
+  /**
+   * Scans the installed package archives (base APK + splits) for bundled native
+   * libraries. `nativeLibraryDir` is deliberately NOT consulted for "Bundled": on some
+   * devices/API levels the extracted directory does not reflect the package content.
+   */
   fun collectNativeLibraries(context: Context): NativeLibrariesSnapshot {
-    val dir = runCatching { context.applicationInfo.nativeLibraryDir }.getOrNull()
-    if (dir.isNullOrEmpty()) {
-      return NativeLibrariesSnapshot.error("nativeLibraryDir is unavailable")
+    val info = runCatching { context.applicationInfo }.getOrNull()
+    if (info == null) {
+      return NativeLibrariesSnapshot.error("applicationInfo unavailable")
     }
-    val files = runCatching { File(dir).listFiles { f -> f.isFile && f.name.endsWith(".so") } }
-      .getOrNull()
-    if (files == null) {
-      return NativeLibrariesSnapshot.error("Failed to list $dir")
+    val archives = buildList {
+      info.sourceDir?.takeIf { it.isNotEmpty() }?.let(::add)
+      info.splitSourceDirs?.filter { it.isNotEmpty() }?.let(::addAll)
+    }.distinct()
+    if (archives.isEmpty()) {
+      return NativeLibrariesSnapshot.error("No package archives found")
     }
 
-    val classified = files.map { NativeLibClassifier.classify(it.name) }.sortedBy { it.fileName }
+    val libNames = LinkedHashSet<String>()
+    val diagnostics = mutableListOf<String>()
+    var readableArchives = 0
+    for (path in archives) {
+      try {
+        java.util.zip.ZipFile(path).use { zip ->
+          readableArchives++
+          zip.entries().asSequence().forEach { entry ->
+            NativeLibClassifier.parseApkLibEntry(entry.name)?.let(libNames::add)
+          }
+        }
+      } catch (t: Throwable) {
+        diagnostics.add(
+          "Failed to read ${File(path).name}: ${t.javaClass.simpleName}: ${t.message}",
+        )
+      }
+    }
+    if (readableArchives == 0) {
+      return NativeLibrariesSnapshot.error(
+        "No package archive could be read: " + diagnostics.joinToString("; "),
+      )
+    }
+
+    val classified = libNames.map { NativeLibClassifier.classify(it) }.sortedBy { it.fileName }
     val dispatch = classified.filter { it.kind == NativeLibKind.LITE_RT_DISPATCH }
     val compiler = classified.filter { it.kind == NativeLibKind.LITE_RT_COMPILER_PLUGIN }
     val qnnCore = classified.filter { it.kind == NativeLibKind.QNN_CORE }
@@ -156,7 +185,9 @@ object SystemInfoCollector {
       otherLibs = other,
       htpGenerations = htpGenerations,
       liteRtVendorLabels = liteRtVendorLabels,
-      totalScanned = files.size,
+      totalScanned = libNames.size,
+      archivesScanned = readableArchives,
+      diagnostics = diagnostics,
       errorDetail = null,
     )
   }
@@ -173,26 +204,11 @@ object SystemInfoCollector {
     return null
   }
 
-  private fun decodeVulkanVersion(encoded: Long): String {
-    val major = (encoded shr 22) and 0x3FFL
-    val minor = (encoded shr 12) and 0xFFFL
-    val patch = encoded and 0xFFFL
-    val variant = (encoded shr 29) and 0x7L
-    return buildString {
-      append("variant ").append(variant)
-      append(", Vulkan ").append(major).append('.').append(minor).append('.').append(patch)
-    }
-  }
+  private fun decodeVulkanVersion(encoded: Long): String = VulkanVersionDecoder.decodeVersion(encoded)
 
-  private fun decodeVulkanLevel(level: Long): String =
-    when (level) {
-      0L -> "0 (no Vulkan requirements)"
-      1L -> "1 (Vulkan 1.x baseline)"
-      VULKAN_COMPUTE_MAGIC.toLong() -> "20150324 (compute)"
-      else -> "raw $level"
-    }
+  private fun decodeVulkanLevel(level: Long): String = VulkanVersionDecoder.decodeLevel(level)
 
-  private fun toHex(value: Long): String = "0x%08X".format(value)
+  private fun toHex(value: Long): String = VulkanVersionDecoder.toHex(value)
 
   private fun vendorIsBundled(vendor: RuntimeVendor, libs: NativeLibrariesSnapshot): Boolean =
     (libs.dispatchLibs + libs.compilerPluginLibs).any {

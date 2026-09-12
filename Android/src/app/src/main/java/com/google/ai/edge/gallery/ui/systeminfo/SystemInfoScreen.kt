@@ -234,10 +234,14 @@ private fun AiRuntimeSection(snapshot: SystemInfoSnapshot) {
 @Composable
 private fun NativeLibrariesSection(snapshot: SystemInfoSnapshot) {
   val libs = snapshot.nativeLibs
-  Section("Bundled native libraries (${libs.totalScanned} .so scanned)") {
+  Section("Bundled native libraries (${libs.totalScanned} .so in package)") {
     libs.errorDetail?.let {
       InfoRow("Error", it, monospace = true)
       return@Section
+    }
+    InfoRow("Package archives scanned", libs.archivesScanned.toString())
+    for (diagnostic in libs.diagnostics) {
+      InfoRow("Diagnostic", diagnostic, monospace = true)
     }
     InfoRowGroup("LiteRT dispatch", libs.dispatchLibs.map { it.fileName })
     InfoRowGroup("LiteRT compiler plugins", libs.compilerPluginLibs.map { it.fileName })

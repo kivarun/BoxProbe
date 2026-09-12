@@ -16,6 +16,25 @@ object NativeLibClassifier {
   private const val QNN_PREFIX = "libqnn"
   private const val HTP_GENERATION_REGEX_PATTERN = "V(\\d{2,3})"
 
+  private val KNOWN_ABIS = setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+
+  /**
+   * Extracts the library file name from an installed-package entry path.
+   *
+   * Accepts entries like `lib/arm64-v8a/libLiteRtDispatch_MediaTek.so` and
+   * `lib/arm64-v8a/libQnnHtpV79Skel.so`. Returns null for anything else
+   * (`assets/foo.so`, `META-INF/foo`, `lib/arm64-v8a/not-a-library.txt`, …).
+   */
+  fun parseApkLibEntry(entryPath: String): String? {
+    val parts = entryPath.trim().split('/')
+    if (parts.size != 3) return null
+    if (parts[0] != "lib") return null
+    if (parts[1].lowercase(Locale.US) !in KNOWN_ABIS) return null
+    val fileName = parts[2]
+    if (!fileName.lowercase(Locale.US).endsWith(".so")) return null
+    return fileName
+  }
+
   /** Classifies a single library file name (without directory). */
   fun classify(fileName: String): BundledNativeLib {
     val name = fileName.trim()

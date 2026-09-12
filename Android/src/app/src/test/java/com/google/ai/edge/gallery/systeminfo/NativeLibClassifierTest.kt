@@ -70,4 +70,48 @@ class NativeLibClassifierTest {
     assertEquals(RuntimeVendor.GOOGLE_TENSOR, NativeLibClassifier.vendorLabelToRuntimeVendor("GoogleTensor"))
     assertEquals(RuntimeVendor.OTHER, NativeLibClassifier.vendorLabelToRuntimeVendor("Acme"))
   }
+
+  @Test
+  fun apkLibEntries_accepted() {
+    assertEquals(
+      "libLiteRtDispatch_MediaTek.so",
+      NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libLiteRtDispatch_MediaTek.so"),
+    )
+    assertEquals(
+      "libQnnHtpV79Skel.so",
+      NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libQnnHtpV79Skel.so"),
+    )
+    assertEquals(
+      "libLiteRtDispatch_Qualcomm.so",
+      NativeLibClassifier.parseApkLibEntry("lib/armeabi-v7a/libLiteRtDispatch_Qualcomm.so"),
+    )
+  }
+
+  @Test
+  fun apkNonLibEntries_ignored() {
+    assertNull(NativeLibClassifier.parseApkLibEntry("assets/foo.so"))
+    assertNull(NativeLibClassifier.parseApkLibEntry("META-INF/foo"))
+    assertNull(NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/not-a-library.txt"))
+    assertNull(NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/not-a-library.so.txt"))
+    assertNull(NativeLibClassifier.parseApkLibEntry("lib/libLiteRtDispatch_MediaTek.so"))
+    assertNull(NativeLibClassifier.parseApkLibEntry("lib/unknown-abi/libFoo.so"))
+  }
+
+  @Test
+  fun apkEntryParsing_thenClassification_endToEnd() {
+    val name = NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libLiteRtDispatch_MediaTek.so")
+    val lib = NativeLibClassifier.classify(name!!)
+    assertEquals("LITE_RT_DISPATCH", lib.kind.name)
+    assertEquals("MediaTek", lib.vendorLabel)
+
+    val gtName = NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libLiteRtDispatch_GoogleTensor.so")
+    val gtLib = NativeLibClassifier.classify(gtName!!)
+    assertEquals("GoogleTensor", gtLib.vendorLabel)
+
+    val qcPluginName = NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libLiteRtCompilerPlugin_Qualcomm.so")
+    assertEquals("LITE_RT_COMPILER_PLUGIN", NativeLibClassifier.classify(qcPluginName!!).kind.name)
+
+    val htpName = NativeLibClassifier.parseApkLibEntry("lib/arm64-v8a/libQnnHtpV79Skel.so")
+    assertEquals("V79", NativeLibClassifier.classify(htpName!!).htpGeneration)
+  }
 }
