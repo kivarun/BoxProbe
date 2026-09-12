@@ -46,6 +46,7 @@ class NpuProbeFormattingTest {
     assertEquals(
       listOf(
         "PRECHECK",
+        "LITERT_CORE_LIBRARY_LOAD",
         "DISPATCH_LIBRARY_LOAD",
         "BACKEND_CREATED",
         "ENGINE_CREATED",
@@ -110,8 +111,22 @@ class NpuProbeFormattingTest {
         stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
       )
     assertEquals(
-      "Dispatch library loaded",
+      "Core + dispatch loaded",
       npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, probeResult),
+    )
+  }
+
+  @Test
+  fun runtimeValidatedLabel_coreLoadFailure_stopsBeforeDispatch() {
+    val probeResult =
+      result(
+        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.LITERT_CORE_LIBRARY_LOAD)),
+        failedStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
+        stoppedAfterStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
+      )
+    assertEquals(
+      "Failed at LITERT_CORE_LIBRARY_LOAD",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_FAILED, probeResult),
     )
   }
 

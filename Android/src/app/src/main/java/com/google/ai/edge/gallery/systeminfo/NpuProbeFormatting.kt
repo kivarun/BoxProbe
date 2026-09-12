@@ -7,7 +7,7 @@ fun npuProbeRuntimeValidatedLabel(status: NpuProbeStatus, result: NpuProbeResult
       result?.failedStage?.let { "Failed at ${it.name}" } ?: "Initialization failed"
     status == NpuProbeStatus.INITIALIZATION_PASSED &&
       result?.stoppedAfterStage == NpuProbeStage.DISPATCH_LIBRARY_LOAD ->
-      "Dispatch library loaded"
+      "Core + dispatch loaded"
     else -> npuProbeStatusLabel(status)
   }
 

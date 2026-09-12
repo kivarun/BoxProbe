@@ -8,6 +8,7 @@ import java.io.File
 /** Stages of the active NPU initialization probe, in execution order. */
 enum class NpuProbeStage {
   PRECHECK,
+  LITERT_CORE_LIBRARY_LOAD,
   DISPATCH_LIBRARY_LOAD,
   BACKEND_CREATED,
   ENGINE_CREATED,
@@ -86,6 +87,9 @@ object NpuRuntimeProbe {
   /** MediaTek dispatch library loaded by the diagnostic dlopen stage. */
   const val DISPATCH_LIBRARY_NAME = "libLiteRtDispatch_MediaTek.so"
 
+  /** LiteRT core C API runtime required by the dispatch library (DT_NEEDED). */
+  const val CORE_LIBRARY_NAME = "libLiteRt.so"
+
   /**
    * Runs the probe for [model] on the caller thread. Blocking native calls are
    * expected; callers must invoke this off the main thread.
@@ -123,9 +127,30 @@ object NpuRuntimeProbe {
       )
     }
 
-    // --- Stage 2: DISPATCH_LIBRARY_LOAD (pure dlopen diagnostic, no LiteRT calls). ---
-    // The runtime's own "Loading shared library: …" line is printed before the actual
-    // dlopen, so its logs alone do not prove the library loaded. Load it explicitly.
+    // --- Stage 2: LITERT_CORE_LIBRARY_LOAD (pure dlopen diagnostic). ---
+    val corePath = File(nativeLibraryDir, CORE_LIBRARY_NAME).absolutePath
+    val coreStart = SystemClock.elapsedRealtime()
+    val coreError: Throwable? =
+      try {
+        System.load(corePath)
+        null
+      } catch (t: Throwable) {
+        t
+      }
+    stageResults.add(
+      stageResult(NpuProbeStage.LITERT_CORE_LIBRARY_LOAD, coreStart, coreError)
+    )
+    if (coreError != null) {
+      return NpuProbeResult(
+        precheck = precheck.copy(dispatchLibraryPath = corePath),
+        stageResults = stageResults,
+        failedStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
+        stoppedAfterStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
+        totalDurationMs = elapsedSince(startTotal),
+      )
+    }
+
+    // --- Stage 3: DISPATCH_LIBRARY_LOAD (pure dlopen diagnostic, no LiteRT calls). ---
     val dispatchPath = File(nativeLibraryDir, DISPATCH_LIBRARY_NAME).absolutePath
     val loadStart = SystemClock.elapsedRealtime()
     val loadError: Throwable? =
