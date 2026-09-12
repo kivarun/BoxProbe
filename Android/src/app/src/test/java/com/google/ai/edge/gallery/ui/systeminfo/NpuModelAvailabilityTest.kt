@@ -11,18 +11,22 @@ import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NpuModelAvailabilityTest {
 
-  private fun npuModel(name: String) =
+  private val deviceSoc = "mt6991"
+
+  private fun npuModel(name: String, targetSoc: String? = null) =
     Model(
       name = name,
       isLlm = true,
       runtimeType = RuntimeType.LITERT_LM,
       accelerators = listOf(Accelerator.GPU, Accelerator.NPU),
       downloadFileName = "$name.litertlm",
+      targetSoc = targetSoc,
     )
 
   private fun gpuOnlyModel(name: String) =
@@ -59,9 +63,11 @@ class NpuModelAvailabilityTest {
       modelImportingUpdateTrigger = importingUpdateTrigger,
     )
 
+  private fun succeeded(model: Model) = model.name to status(ModelDownloadStatusType.SUCCEEDED)
+
   @Test
   fun noModel_isUnavailable() {
-    val key = NpuModelAvailabilityKey.of(uiState(models = emptyList()))
+    val key = NpuModelAvailabilityKey.of(uiState(models = emptyList()), deviceSoc)
     assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(key))
     assertTrue(key.succeededNpuCompatibleModelNames.isEmpty())
   }
@@ -75,22 +81,44 @@ class NpuModelAvailabilityTest {
           models = listOf(model),
           downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.IN_PROGRESS)),
         ),
+        deviceSoc,
       )
     assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(key))
   }
 
   @Test
-  fun succeededNpuModel_isAvailable() {
+  fun downloadedGenericNpuArtifact_isAvailable() {
     val model = npuModel("npu-1b")
     val key =
       NpuModelAvailabilityKey.of(
-        uiState(
-          models = listOf(model),
-          downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.SUCCEEDED)),
-        ),
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
       )
     assertEquals(NpuModelAvailability.AVAILABLE, npuModelAvailability(key))
     assertEquals(setOf(model.name), key.succeededNpuCompatibleModelNames)
+  }
+
+  @Test
+  fun downloadedDeviceMatchingNpuArtifact_isAvailable() {
+    val model = npuModel("gemma-mt6991", targetSoc = "mt6991")
+    val key =
+      NpuModelAvailabilityKey.of(
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
+      )
+    assertEquals(NpuModelAvailability.AVAILABLE, npuModelAvailability(key))
+  }
+
+  @Test
+  fun wrongSocNpuArtifact_isUnavailable() {
+    val model = npuModel("gemma-sm8650", targetSoc = "sm8650")
+    val key =
+      NpuModelAvailabilityKey.of(
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
+      )
+    assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(key))
+    assertTrue(key.succeededNpuCompatibleModelNames.isEmpty())
   }
 
   @Test
@@ -98,23 +126,19 @@ class NpuModelAvailabilityTest {
     val model = gpuOnlyModel("gpu-1b")
     val key =
       NpuModelAvailabilityKey.of(
-        uiState(
-          models = listOf(model),
-          downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.SUCCEEDED)),
-        ),
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
       )
     assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(key))
   }
 
   @Test
   fun deleteLastNpuModel_isUnavailable() {
-    val model = npuModel("npu-1b")
+    val model = npuModel("npu-1b", targetSoc = deviceSoc)
     val before =
       NpuModelAvailabilityKey.of(
-        uiState(
-          models = listOf(model),
-          downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.SUCCEEDED)),
-        ),
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
       )
     val after =
       NpuModelAvailabilityKey.of(
@@ -123,6 +147,7 @@ class NpuModelAvailabilityTest {
           downloadStatus = emptyMap(),
           importingUpdateTrigger = 42L,
         ),
+        deviceSoc,
       )
     assertEquals(NpuModelAvailability.AVAILABLE, npuModelAvailability(before))
     assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(after))
@@ -138,13 +163,12 @@ class NpuModelAvailabilityTest {
           models = listOf(model),
           downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.IN_PROGRESS)),
         ),
+        deviceSoc,
       )
     val succeeded =
       NpuModelAvailabilityKey.of(
-        uiState(
-          models = listOf(model),
-          downloadStatus = mapOf(model.name to status(ModelDownloadStatusType.SUCCEEDED)),
-        ),
+        uiState(models = listOf(model), downloadStatus = mapOf(succeeded(model))),
+        deviceSoc,
       )
     assertNotEquals(inProgress, succeeded)
   }
@@ -166,6 +190,7 @@ class NpuModelAvailabilityTest {
                 ),
             ),
         ),
+        deviceSoc,
       )
     val progress2 =
       NpuModelAvailabilityKey.of(
@@ -181,6 +206,7 @@ class NpuModelAvailabilityTest {
                 ),
             ),
         ),
+        deviceSoc,
       )
     assertEquals(progress1, progress2)
   }
@@ -188,30 +214,33 @@ class NpuModelAvailabilityTest {
   @Test
   fun importingUpdateTriggerChangesKey() {
     val model = npuModel("imported-npu")
-    val succeeded = status(ModelDownloadStatusType.SUCCEEDED)
     val key1 =
       NpuModelAvailabilityKey.of(
         uiState(
           models = listOf(model),
-          downloadStatus = mapOf(model.name to succeeded),
+          downloadStatus = mapOf(succeeded(model)),
           importingUpdateTrigger = 1L,
         ),
+        deviceSoc,
       )
     val key2 =
       NpuModelAvailabilityKey.of(
         uiState(
           models = listOf(model),
-          downloadStatus = mapOf(model.name to succeeded),
+          downloadStatus = mapOf(succeeded(model)),
           importingUpdateTrigger = 2L,
         ),
+        deviceSoc,
       )
     assertNotEquals(key1, key2)
   }
 
   @Test
   fun allowlistLoadingIsPartOfKey() {
-    val keyLoading = NpuModelAvailabilityKey.of(uiState(models = emptyList(), allowlistLoading = true))
-    val keyLoaded = NpuModelAvailabilityKey.of(uiState(models = emptyList(), allowlistLoading = false))
+    val keyLoading =
+      NpuModelAvailabilityKey.of(uiState(models = emptyList(), allowlistLoading = true), deviceSoc)
+    val keyLoaded =
+      NpuModelAvailabilityKey.of(uiState(models = emptyList(), allowlistLoading = false), deviceSoc)
     assertFalse(keyLoading == keyLoaded)
     assertEquals(NpuModelAvailability.UNAVAILABLE, npuModelAvailability(keyLoaded))
   }
@@ -226,11 +255,46 @@ class NpuModelAvailabilityTest {
         accelerators = listOf(Accelerator.TPU),
       )
     val aicoreModel =
-      Model(name = "aicore", isLlm = true, runtimeType = RuntimeType.AICORE, accelerators = listOf(Accelerator.NPU))
+      Model(
+        name = "aicore",
+        isLlm = true,
+        runtimeType = RuntimeType.AICORE,
+        accelerators = listOf(Accelerator.NPU),
+      )
     val nonLlm =
-      Model(name = "embed", isLlm = false, runtimeType = RuntimeType.LITERT_LM, accelerators = listOf(Accelerator.NPU))
-    assertTrue(isNpuCompatibleCandidate(tpuModel))
-    assertFalse(isNpuCompatibleCandidate(aicoreModel))
-    assertFalse(isNpuCompatibleCandidate(nonLlm))
+      Model(
+        name = "embed",
+        isLlm = false,
+        runtimeType = RuntimeType.LITERT_LM,
+        accelerators = listOf(Accelerator.NPU),
+      )
+    assertTrue(isNpuCompatibleCandidate(tpuModel, deviceSoc))
+    assertFalse(isNpuCompatibleCandidate(aicoreModel, deviceSoc))
+    assertFalse(isNpuCompatibleCandidate(nonLlm, deviceSoc))
+  }
+
+  @Test
+  fun selection_preferredKept() {
+    assertEquals("b", resolveNpuSelection(listOf("a", "b"), "b"))
+  }
+
+  @Test
+  fun selection_preferredDeleted_fallsBackToFirstDeterministically() {
+    assertEquals("a", resolveNpuSelection(listOf("a"), "removed"))
+    assertEquals(
+      "first",
+      resolveNpuSelection(listOf("first", "second"), "removed"),
+    )
+  }
+
+  @Test
+  fun selection_emptyCandidates_clears() {
+    assertNull(resolveNpuSelection(emptyList(), "a"))
+    assertNull(resolveNpuSelection(emptyList(), null))
+  }
+
+  @Test
+  fun selection_noPreferred_selectsFirst() {
+    assertEquals("a", resolveNpuSelection(listOf("a", "b"), null))
   }
 }

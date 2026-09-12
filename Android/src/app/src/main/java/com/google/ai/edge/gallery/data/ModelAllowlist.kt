@@ -52,6 +52,8 @@ data class AllowedModel(
   val defaultConfig: DefaultConfig,
   val taskTypes: List<String>,
   val disabled: Boolean? = null,
+  val displayName: String? = null,
+  val targetSoc: String? = null,
   val llmSupportImage: Boolean? = null,
   val llmSupportAudio: Boolean? = null,
   val llmSupportTinyGarden: Boolean? = null,
@@ -190,6 +192,7 @@ data class AllowedModel(
     }
     return Model(
       name = name,
+      displayName = displayName ?: "",
       version = version,
       info = finalDescription,
       url = downloadUrl,
@@ -214,6 +217,7 @@ data class AllowedModel(
       runtimeType = runtimeType ?: RuntimeType.LITERT_LM,
       aicoreReleaseStage = aicoreReleaseStage,
       aicorePreference = aicorePreference,
+      targetSoc = targetSoc?.lowercase(),
     )
   }
 

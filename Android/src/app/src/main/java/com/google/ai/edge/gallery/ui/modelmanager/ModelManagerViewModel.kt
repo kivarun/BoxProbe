@@ -76,10 +76,8 @@ import net.openid.appauth.ResponseTypeValues
 
 private const val TAG = "AGModelManagerViewModel"
 private const val TEXT_INPUT_HISTORY_MAX_SIZE = 50
-private const val MODEL_ALLOWLIST_FILENAME = "model_allowlist.json"
+private const val MODEL_CATALOG_FILENAME = "model_catalog.json"
 private const val MODEL_ALLOWLIST_TEST_FILENAME = "model_allowlist_test.json"
-private const val ALLOWLIST_BASE_URL =
-  "https://raw.githubusercontent.com/google-ai-edge/gallery/refs/heads/main/model_allowlists"
 
 private const val TEST_MODEL_ALLOW_LIST = ""
 
@@ -876,15 +874,10 @@ constructor(
         }
 
         if (modelAllowlist == null) {
-          // Always use bundled assets first so app-version-controlled URLs take effect immediately.
-          Log.d(TAG, "Loading model allowlist from assets")
+          // BoxProbe's own version-controlled catalog bundled in assets is the only
+          // model list authority; there is no remote or disk-cache fallback.
+          Log.d(TAG, "Loading model catalog from assets")
           modelAllowlist = readModelAllowlistFromAssets()
-
-          if (modelAllowlist == null) {
-            // Fall back to disk cache if assets somehow fails.
-            Log.w(TAG, "Failed to load model allowlist from assets. Trying disk cache")
-            modelAllowlist = readModelAllowlistFromDisk()
-          }
         }
 
         if (modelAllowlist == null) {
@@ -925,13 +918,21 @@ constructor(
             continue
           }
 
-          // Ignore the allowedModel if its accelerator is only npu and this device's soc is not in
-          // its socToModelFiles.
+          // Ignore the allowedModel if it is NPU-only and this artifact cannot run on
+          // this device: either the artifact targets a different SoC, or legacy
+          // per-soc model files do not include this SOC.
           val accelerators = allowedModel.defaultConfig.accelerators ?: ""
           val acceleratorList = accelerators.split(",").map { it.trim() }.filter { it.isNotEmpty() }
           if (acceleratorList.size == 1 && acceleratorList[0] == "npu") {
             val socToModelFiles = allowedModel.socToModelFiles
-            if (socToModelFiles != null && !socToModelFiles.containsKey(SOC)) {
+            val supportedOnDevice =
+              when {
+                allowedModel.targetSoc != null ->
+                  allowedModel.targetSoc!!.equals(SOC, ignoreCase = true)
+                socToModelFiles != null -> socToModelFiles.containsKey(SOC)
+                else -> true
+              }
+            if (!supportedOnDevice) {
               Log.d(
                 TAG,
                 "Ignoring model '${allowedModel.name}' because it's NPU-only and not supported on SOC: $SOC",
@@ -1015,19 +1016,8 @@ constructor(
     lifecycleProvider.isAppInForeground = foreground
   }
 
-  private fun saveModelAllowlistToDisk(modelAllowlistContent: String) {
-    try {
-      Log.d(TAG, "Saving model allowlist to disk...")
-      val file = File(externalFilesDir, MODEL_ALLOWLIST_FILENAME)
-      file.writeText(modelAllowlistContent)
-      Log.d(TAG, "Done: saving model allowlist to disk.")
-    } catch (e: Exception) {
-      Log.e(TAG, "failed to write model allowlist to disk", e)
-    }
-  }
-
   private fun readModelAllowlistFromDisk(
-    fileName: String = MODEL_ALLOWLIST_FILENAME
+    fileName: String = MODEL_CATALOG_FILENAME
   ): ModelAllowlist? {
     try {
       Log.d(TAG, "Reading model allowlist from disk: $fileName")
@@ -1052,7 +1042,7 @@ constructor(
   private fun readModelAllowlistFromAssets(): ModelAllowlist? {
     try {
       Log.d(TAG, "Reading model allowlist from assets...")
-      val content = context.assets.open(MODEL_ALLOWLIST_FILENAME).bufferedReader().use { it.readText() }
+      val content = context.assets.open(MODEL_CATALOG_FILENAME).bufferedReader().use { it.readText() }
       Log.d(TAG, "Model allowlist content from assets: $content")
       val gson = Gson()
       return gson.fromJson(content, ModelAllowlist::class.java)
@@ -1332,8 +1322,4 @@ constructor(
 
     return downloadedFileExists || unzippedDirectoryExists
   }
-}
-
-private fun getAllowlistUrl(version: String): String {
-  return "$ALLOWLIST_BASE_URL/${version}.json"
 }

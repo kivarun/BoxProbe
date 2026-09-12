@@ -1,7 +1,10 @@
 package com.google.ai.edge.gallery.ui.systeminfo
 
+import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,26 +14,35 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
+import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.systeminfo.DeviceMatchStatus
 import com.google.ai.edge.gallery.systeminfo.GpuSnapshot
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
@@ -231,6 +243,7 @@ private fun AiRuntimeSection(
   modelManagerViewModel: ModelManagerViewModel,
 ) {
   val npuProbeState by viewModel.npuProbeState.collectAsState()
+  val npuCandidates by viewModel.npuCandidates.collectAsState()
   LaunchedEffect(Unit) { viewModel.observeNpuModelAvailability(modelManagerViewModel) }
 
   Section("AI runtime") {
@@ -263,6 +276,8 @@ private fun AiRuntimeSection(
         if (deviceMatched) {
           NpuProbePanel(
             state = npuProbeState,
+            candidates = npuCandidates,
+            onSelectModel = { viewModel.selectNpuCandidate(it) },
             onRunProbe = { viewModel.runNpuProbe(modelManagerViewModel) },
           )
         }
@@ -272,7 +287,12 @@ private fun AiRuntimeSection(
 }
 
 @Composable
-private fun NpuProbePanel(state: NpuProbeUiState, onRunProbe: () -> Unit) {
+private fun NpuProbePanel(
+  state: NpuProbeUiState,
+  candidates: List<Model>,
+  onSelectModel: (String) -> Unit,
+  onRunProbe: () -> Unit,
+) {
   if (state.status == NpuProbeStatus.RUNNING) {
     Row(
       verticalAlignment = Alignment.CenterVertically,
@@ -284,7 +304,35 @@ private fun NpuProbePanel(state: NpuProbeUiState, onRunProbe: () -> Unit) {
     return
   }
 
-  Button(onClick = onRunProbe, enabled = state.selectedModelName != null) {
+  if (candidates.isEmpty()) {
+    Text(
+      "No downloaded NPU-compatible model",
+      style = MaterialTheme.typography.labelSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+  } else {
+    NpuModelSelector(
+      selectedModelName = state.selectedModelName,
+      candidates = candidates,
+      onSelect = onSelectModel,
+    )
+  }
+
+  val selectedModel = candidates.firstOrNull { it.name == state.selectedModelName }
+  if (selectedModel != null) {
+    Column(
+      modifier = Modifier.padding(top = 4.dp),
+      verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+      InfoRow("Model", selectedModel.displayName.ifEmpty { selectedModel.name })
+      InfoRow("Artifact", selectedModel.downloadFileName, monospace = true)
+      InfoRow("Backend", selectedModel.accelerators.joinToString(" / ") { it.label })
+      InfoRow("Target SoC", selectedModel.targetSoc ?: "generic")
+      InfoRow("Detected SoC", Build.SOC_MODEL.ifEmpty { "—" }, monospace = true)
+    }
+  }
+
+  Button(onClick = onRunProbe, enabled = selectedModel != null) {
     Text("Probe NPU", style = MaterialTheme.typography.labelLarge)
   }
 
@@ -294,7 +342,6 @@ private fun NpuProbePanel(state: NpuProbeUiState, onRunProbe: () -> Unit) {
     modifier = Modifier.padding(top = 4.dp),
     verticalArrangement = Arrangement.spacedBy(2.dp),
   ) {
-    InfoRow("Selected model", state.selectedModelName ?: "—")
     InfoRow("Requested backend", "NPU")
     InfoRow("nativeLibraryDir", precheck.nativeLibraryDir, monospace = true)
     InfoRow("Model path", precheck.modelPath, monospace = true)
@@ -316,6 +363,46 @@ private fun NpuProbePanel(state: NpuProbeUiState, onRunProbe: () -> Unit) {
           .joinToString(": "),
         monospace = true,
       )
+    }
+  }
+}
+
+@Composable
+private fun NpuModelSelector(
+  selectedModelName: String?,
+  candidates: List<Model>,
+  onSelect: (String) -> Unit,
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  val selected = candidates.firstOrNull { it.name == selectedModelName }
+  Box {
+    OutlinedButton(
+      onClick = { menuOpen = true },
+      contentPadding = PaddingValues(horizontal = 12.dp),
+    ) {
+      Text(
+        if (selected != null) selected.displayName.ifEmpty { selected.name } else "Select model",
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.bodyMedium,
+      )
+      Icon(Icons.Rounded.ArrowDropDown, contentDescription = "Select probe model")
+    }
+    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+      for (model in candidates) {
+        DropdownMenuItem(
+          text = {
+            Text(
+              model.displayName.ifEmpty { model.name },
+              style = MaterialTheme.typography.bodyMedium,
+            )
+          },
+          onClick = {
+            onSelect(model.name)
+            menuOpen = false
+          },
+        )
+      }
     }
   }
 }

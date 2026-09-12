@@ -1,0 +1,57 @@
+{
+  "models": [
+    {
+      "name": "Qwen2.5-1.5B-Instruct",
+      "modelId": "litert-community/Qwen2.5-1.5B-Instruct",
+      "modelFile": "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm",
+      "description": "Generic [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct) artifact for deployment with [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md). Compatible with GPU and CPU only — this artifact is not NPU-compatible.",
+      "sizeInBytes": 1597931520,
+      "minDeviceMemoryInGb": 4,
+      "commitHash": "19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
+      "defaultConfig": {
+        "topK": 20,
+        "topP": 0.8,
+        "temperature": 0.7,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+    },
+    {
+      "name": "Gemma3-1B-IT",
+      "modelId": "litert-community/Gemma3-1B-IT",
+      "modelFile": "Gemma3-1B-IT_multi-prefill-seq_q4_ekv4096.litertlm",
+      "description": "Generic [Gemma3-1B-IT](https://huggingface.co/litert-community/Gemma3-1B-IT) artifact for deployment with [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM/blob/main/kotlin/README.md). Compatible with GPU and CPU only — this artifact is not NPU-compatible.",
+      "sizeInBytes": 584417280,
+      "minDeviceMemoryInGb": 4,
+      "commitHash": "a6306a4e292016480083b73b8dc6f3f939ae04c3",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 4096,
+        "accelerators": "gpu,cpu"
+      },
+      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+    },
+    {
+      "name": "Gemma3-1B-IT-MT6991-NPU",
+      "displayName": "Gemma3-1B-IT — MT6991 NPU",
+      "modelId": "litert-community/Gemma3-1B-IT",
+      "modelFile": "Gemma3-1B-IT_q4_ekv1280_mt6991.litertlm",
+      "targetSoc": "mt6991",
+      "description": "[Gemma3-1B-IT](https://huggingface.co/litert-community/Gemma3-1B-IT) artifact pre-compiled for the **MediaTek MT6991** NPU. This is a distinct artifact from the generic Gemma3-1B-IT build and is compatible with the NPU backend only.",
+      "sizeInBytes": 1033814016,
+      "minDeviceMemoryInGb": 4,
+      "commitHash": "a6306a4e292016480083b73b8dc6f3f939ae04c3",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 1024,
+        "accelerators": "npu"
+      },
+      "taskTypes": ["llm_chat", "llm_prompt_lab"]
+    }
+  ]
+}

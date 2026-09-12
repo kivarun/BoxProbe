@@ -44,7 +44,9 @@ import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.ModelDownloadStatus
 import com.google.ai.edge.gallery.data.ModelDownloadStatusType
 import com.google.ai.edge.gallery.data.RuntimeType
+import com.google.ai.edge.gallery.data.SOC
 import com.google.ai.edge.gallery.data.Task
+import com.google.ai.edge.gallery.data.modelCompatibilitySummary
 import com.google.ai.edge.gallery.ui.common.ClickableLink
 import com.google.ai.edge.gallery.ui.common.humanReadableSize
 import com.google.ai.edge.gallery.ui.theme.customColors
@@ -181,6 +183,15 @@ fun ModelNameAndStatus(
                   ),
                 overflow = TextOverflow.Visible,
                 modifier = Modifier.offset(y = if (index == 0) 0.dp else (-1).dp),
+              )
+            }
+            if (!model.imported) {
+              Text(
+                modelCompatibilitySummary(model, SOC),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                style = MaterialTheme.typography.labelSmall,
+                overflow = TextOverflow.Ellipsis,
               )
             }
           }

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.data.SOC
 import com.google.ai.edge.gallery.systeminfo.NpuProbeResult
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
 import com.google.ai.edge.gallery.systeminfo.NpuRuntimeProbe
@@ -53,6 +54,13 @@ constructor(
   private val _npuProbeState = MutableStateFlow(NpuProbeUiState())
   val npuProbeState = _npuProbeState.asStateFlow()
 
+  /** Downloaded models that are explicit NPU probe candidates for this device. */
+  private val _npuCandidates = MutableStateFlow<List<Model>>(emptyList())
+  val npuCandidates = _npuCandidates.asStateFlow()
+
+  /** Lowercase SoC model of this device, e.g. "mt6991". */
+  private val deviceSoc: String = SOC
+
   val buildInfo: BuildInfoSnapshot = readBuildInfo()
 
   private var availabilityObservationStarted = false
@@ -84,7 +92,7 @@ constructor(
   /**
    * Observes [ModelManagerViewModel.uiState] and re-evaluates NPU model availability
    * whenever the stable [NpuModelAvailabilityKey] changes: download completion, model
-   * deletion, model import and allowlist load completion all change the key. Download
+   * deletion, model import and catalog load completion all change the key. Download
    * progress updates do not change the key, so availability is not recomputed per byte.
    */
   fun observeNpuModelAvailability(modelManagerViewModel: ModelManagerViewModel) {
@@ -92,27 +100,49 @@ constructor(
     availabilityObservationStarted = true
     viewModelScope.launch {
       modelManagerViewModel.uiState
-        .map { NpuModelAvailabilityKey.of(it) }
+        .map { NpuModelAvailabilityKey.of(it, deviceSoc) }
         .distinctUntilChanged()
         .collect { refreshNpuModelAvailability(modelManagerViewModel) }
     }
   }
 
+  /** Manually selects a probe model from the candidate list. */
+  fun selectNpuCandidate(modelName: String) {
+    if (_npuProbeState.value.status == NpuProbeStatus.RUNNING) return
+    if (_npuCandidates.value.none { it.name == modelName }) return
+    _npuProbeState.value =
+      _npuProbeState.value.copy(
+        selectedModelName = modelName,
+        status =
+          if (_npuProbeState.value.status == NpuProbeStatus.NO_MODEL) NpuProbeStatus.NOT_PROBED
+          else _npuProbeState.value.status,
+      )
+  }
+
   /**
-   * Re-evaluates whether a downloaded LiteRT-LM model whose allowlist permits NPU is
-   * available locally. No model is downloaded automatically.
+   * Recomputes the candidate list and the deterministic selection: keep the current
+   * selection while it is still a candidate, otherwise select the first candidate, or
+   * clear (and show NO_MODEL) when there are none.
    */
   fun refreshNpuModelAvailability(modelManagerViewModel: ModelManagerViewModel) {
     if (_npuProbeState.value.status == NpuProbeStatus.RUNNING) return
-    val model = selectNpuCompatibleModel(modelManagerViewModel)
+    val candidates =
+      modelManagerViewModel.getAllDownloadedModels()
+        .filter { isNpuCompatibleCandidate(it, deviceSoc) }
+    val selected =
+      resolveNpuSelection(
+        candidates = candidates.map { it.name },
+        preferred = _npuProbeState.value.selectedModelName,
+      )
+    _npuCandidates.value = candidates
     _npuProbeState.value =
       _npuProbeState.value.copy(
-        selectedModelName = model?.name,
+        selectedModelName = selected,
         status =
           when {
-            model == null && _npuProbeState.value.status == NpuProbeStatus.NOT_PROBED ->
+            selected == null && _npuProbeState.value.status == NpuProbeStatus.NOT_PROBED ->
               NpuProbeStatus.NO_MODEL
-            model != null && _npuProbeState.value.status == NpuProbeStatus.NO_MODEL ->
+            selected != null && _npuProbeState.value.status == NpuProbeStatus.NO_MODEL ->
               NpuProbeStatus.NOT_PROBED
             else -> _npuProbeState.value.status
           },
@@ -122,7 +152,8 @@ constructor(
   fun runNpuProbe(modelManagerViewModel: ModelManagerViewModel) {
     if (_npuProbeState.value.status == NpuProbeStatus.RUNNING) return
     viewModelScope.launch {
-      val model = selectNpuCompatibleModel(modelManagerViewModel)
+      val model =
+        _npuCandidates.value.firstOrNull { it.name == _npuProbeState.value.selectedModelName }
       if (model == null) {
         _npuProbeState.value =
           NpuProbeUiState(status = NpuProbeStatus.NO_MODEL, selectedModelName = null)
@@ -142,12 +173,4 @@ constructor(
         )
     }
   }
-
-  /**
-   * First downloaded model that is an NPU probe candidate ([isNpuCompatibleCandidate]),
-   * or null. Deterministic: the first model in sorted display-name order.
-   */
-  private fun selectNpuCompatibleModel(
-    modelManagerViewModel: ModelManagerViewModel,
-  ): Model? = modelManagerViewModel.getAllDownloadedModels().firstOrNull(::isNpuCompatibleCandidate)
 }

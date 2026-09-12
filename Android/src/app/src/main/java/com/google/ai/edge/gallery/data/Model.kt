@@ -260,6 +260,12 @@ data class Model(
   /** Whether the model is imported or not. */
   val imported: Boolean = false,
 
+  /**
+   * Target SoC of a vendor-specific downloadable artifact, lowercase (e.g. "mt6991"),
+   * or null for a generic artifact.
+   */
+  val targetSoc: String? = null,
+
   // The following fields are managed by the app. Don't need to set manually.
   //
   var normalizedName: String = "",
