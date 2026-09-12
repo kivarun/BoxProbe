@@ -11,6 +11,7 @@ enum class NpuProbeStage {
   LITERT_CORE_LIBRARY_LOAD,
   DISPATCH_LIBRARY_LOAD,
   DISPATCH_API_HANDSHAKE,
+  DISPATCH_INITIALIZE,
   BACKEND_CREATED,
   ENGINE_CREATED,
   ENGINE_INITIALIZED,
@@ -71,6 +72,8 @@ data class NpuProbeResult(
     val stoppedAfterStage: NpuProbeStage? = null,
     /** Dispatch API handshake diagnostics, when the handshake stage ran. */
     val dispatchHandshake: NpuDispatchHandshakeResult? = null,
+    /** Dispatch initialize diagnostics, when the initialize stage ran. */
+    val dispatchInitialize: NpuDispatchInitializeResult? = null,
     val totalDurationMs: Long,
   )
 
@@ -197,15 +200,61 @@ object NpuRuntimeProbe {
     stageResults.add(
       stageResult(NpuProbeStage.DISPATCH_API_HANDSHAKE, handshakeStart, handshakeError)
     )
+    if (handshakeError != null) {
+      return NpuProbeResult(
+        precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
+        stageResults = stageResults,
+        failedStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
+        stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
+        dispatchHandshake = handshake,
+        totalDurationMs = elapsedSince(startTotal),
+      )
+    }
 
-    // Diagnostic build: the probe always stops here, dispatch initialization
-    // (Neuron) is a separate later increment.
+    // --- Stage 5: DISPATCH_INITIALIZE (LiteRtDispatchInitialize only). ---
+    // Creates a fresh LiteRtEnvironment with a single DispatchLibraryDir string
+    // option pointing at the installer-managed nativeLibraryDir, an empty
+    // LiteRtOptions, and calls the dispatch's initialize entry point. It never
+    // creates Engine/model/device contexts and never loads the model.
+    // Upstream source contract (revision 0b1b17f): the MediaTek dispatch keeps
+    // references to both the environment and options beyond initialize, so the
+    // bridge deliberately does not destroy them.
+    val initializeStart = SystemClock.elapsedRealtime()
+    var initializeError: Throwable? = null
+    var initializeResult: NpuDispatchInitializeResult? = null
+    try {
+      val json =
+        NpuDispatchHandshakeBridge.initializeDispatch(
+          coreLibraryPath = corePath,
+          dispatchLibraryPath = dispatchPath,
+          nativeLibraryDir = nativeLibraryDir,
+        )
+      initializeResult =
+        parseNpuDispatchInitializeJson(json)
+          ?: throw IllegalStateException("Dispatch initialize: unparsable result: $json")
+      if (initializeResult.status != "OK") {
+        throw IllegalStateException(
+          "Dispatch initialize failed: ${initializeResult.error.ifEmpty {
+            "status=${initializeResult.initStatus} (${initializeResult.statusString})"
+          }}"
+        )
+      }
+    } catch (t: Throwable) {
+      initializeError = t
+    }
+    stageResults.add(
+      stageResult(NpuProbeStage.DISPATCH_INITIALIZE, initializeStart, initializeError)
+    )
+
+    // Diagnostic build: the probe always stops here, engine initialization
+    // (Backend.NPU / Engine / model) is a separate later increment.
     return NpuProbeResult(
       precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
       stageResults = stageResults,
-      failedStage = handshakeError?.let { NpuProbeStage.DISPATCH_API_HANDSHAKE },
-      stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
+      failedStage = initializeError?.let { NpuProbeStage.DISPATCH_INITIALIZE },
+      stoppedAfterStage = NpuProbeStage.DISPATCH_INITIALIZE,
       dispatchHandshake = handshake,
+      dispatchInitialize = initializeResult,
       totalDurationMs = elapsedSince(startTotal),
     )
   }

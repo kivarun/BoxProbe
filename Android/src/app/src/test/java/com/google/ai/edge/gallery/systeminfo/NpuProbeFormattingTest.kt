@@ -62,6 +62,7 @@ class NpuProbeFormattingTest {
         "LITERT_CORE_LIBRARY_LOAD",
         "DISPATCH_LIBRARY_LOAD",
         "DISPATCH_API_HANDSHAKE",
+        "DISPATCH_INITIALIZE",
         "BACKEND_CREATED",
         "ENGINE_CREATED",
         "ENGINE_INITIALIZED",
@@ -200,6 +201,35 @@ class NpuProbeFormattingTest {
       )
     assertEquals(6, rows.size)
     assertEquals("Handshake raw error" to "dlopen failed: nope", rows.last())
+  }
+
+  @Test
+  fun initializeRows_okShowsOk() {
+    val rows =
+      npuProbeInitializeRows(
+        NpuDispatchInitializeResult(status = "OK", initStatus = 0, statusString = "OK"),
+      )
+    assertEquals(listOf("Dispatch initialize" to "OK"), rows)
+  }
+
+  @Test
+  fun initializeRows_failureCarriesStatusAndRawError() {
+    val rows =
+      npuProbeInitializeRows(
+        NpuDispatchInitializeResult(
+          status = "ERROR",
+          initStatus = 14,
+          statusString = "RuntimeFailure",
+          error = "adapter not found",
+        ),
+      )
+    assertEquals(
+      listOf(
+        "Dispatch initialize" to "ERROR — 14 — RuntimeFailure",
+        "Initialize raw error" to "adapter not found",
+      ),
+      rows,
+    )
   }
 
   @Test

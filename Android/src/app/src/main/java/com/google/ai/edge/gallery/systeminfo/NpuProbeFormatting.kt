@@ -6,6 +6,9 @@ fun npuProbeRuntimeValidatedLabel(status: NpuProbeStatus, result: NpuProbeResult
     status == NpuProbeStatus.INITIALIZATION_FAILED ->
       result?.failedStage?.let { "Failed at ${it.name}" } ?: "Initialization failed"
     status == NpuProbeStatus.INITIALIZATION_PASSED &&
+      result?.stoppedAfterStage == NpuProbeStage.DISPATCH_INITIALIZE ->
+      "Core + dispatch + API handshake + initialize"
+    status == NpuProbeStatus.INITIALIZATION_PASSED &&
       result?.stoppedAfterStage == NpuProbeStage.DISPATCH_API_HANDSHAKE ->
       "Core + dispatch + API handshake"
     status == NpuProbeStatus.INITIALIZATION_PASSED &&
@@ -55,6 +58,28 @@ fun npuProbeHandshakeRows(handshake: NpuDispatchHandshakeResult): List<Pair<Stri
   rows.add("Graph interface" to if (handshake.graphPresent) "present" else "absent")
   if (handshake.error.isNotEmpty()) {
     rows.add("Handshake raw error" to handshake.error)
+  }
+  return rows
+}
+
+/** Diagnostic rows for the dispatch initialize stage, e.g. "OK"/"ERROR + status string". */
+fun npuProbeInitializeRows(initialize: NpuDispatchInitializeResult): List<Pair<String, String>> {
+  val rows = mutableListOf<Pair<String, String>>()
+  val value =
+    if (initialize.status == "OK") {
+      "OK"
+    } else {
+      listOf(
+          initialize.status,
+          initialize.initStatus.toString(),
+          initialize.statusString,
+        )
+        .filter { it.isNotEmpty() }
+        .joinToString(" — ")
+    }
+  rows.add("Dispatch initialize" to value)
+  if (initialize.error.isNotEmpty()) {
+    rows.add("Initialize raw error" to initialize.error)
   }
   return rows
 }

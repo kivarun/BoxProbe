@@ -45,6 +45,39 @@ typedef struct {
 
 typedef int (*NpdGetApiFn)(NpdDispatchApi* api);
 
+// Upstream C API signatures (LiteRT revision 0b1b17f):
+//   litert/c/litert_environment.h, litert_options.h, litert_common.h,
+//   litert/vendors/c/litert_dispatch_api.h.
+// Opaque handles are carried as void*; only the diagnostic facts are read.
+typedef void* NpdOpaque;
+typedef int (*NpdCreateEnvironmentFn)(int num_options, const void* options,
+                                      NpdOpaque* environment);
+typedef void (*NpdDestroyEnvironmentFn)(NpdOpaque environment);
+typedef int (*NpdCreateOptionsFn)(NpdOpaque* options);
+typedef void (*NpdDestroyOptionsFn)(NpdOpaque options);
+typedef int (*NpdDispatchInitializeFn)(NpdOpaque environment, NpdOpaque options);
+typedef const char* (*NpdGetStatusStringFn)(int status);
+
+// Layout mirror of LiteRtEnvOption { LiteRtEnvOptionTag tag; LiteRtAny value; }
+// (24 bytes: 4B tag + 4B pad + 16B LiteRtAny) and LiteRtAny
+// { LiteRtAnyType type; union {...}; } (16 bytes: 4B type + 4B pad + 8B slot).
+// Only kLiteRtAnyTypeString (= 8) is constructed here.
+typedef struct {
+  int32_t type;
+  int32_t pad;
+  union {
+    const char* str_value;
+    const void* ptr_value;
+    int64_t int_value;
+  } value;
+} NpdAny;
+
+typedef struct {
+  int32_t tag;
+  int32_t pad;
+  NpdAny value;
+} NpdEnvOption;
+
 std::string jstringToStd(JNIEnv* env, jstring s) {
   if (s == nullptr) return "";
   const char* chars = env->GetStringUTFChars(s, nullptr);
@@ -115,9 +148,145 @@ std::string handshakeJson(const std::string& libraryPath) {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// DISPATCH_INITIALIZE stage (diagnostic-only).
+//
+// Resolve the required C APIs via dlopen/dlsym (no static linkage):
+//   from libLiteRt.so:
+//     LiteRtCreateEnvironment(num_options, const LiteRtEnvOption*,
+//                             LiteRtEnvironment*)
+//     LiteRtCreateOptions(LiteRtOptions*)
+//     LiteRtGetStatusString(LiteRtStatus)
+//   from libLiteRtDispatch_MediaTek.so:
+//     LiteRtDispatchInitialize(LiteRtEnvironment, LiteRtOptions)
+//
+// Environment carries exactly one option:
+//   tag = kLiteRtEnvOptionTagDispatchLibraryDir (1), type = kLiteRtAnyTypeString
+//   (8), value = installer-managed nativeLibraryDir.
+// LiteRtOptions stays empty (no MediaTek opaque options).
+//
+// IMPORTANT (source contract, exact revision 0b1b17f): MediaTek
+// `LiteRtInitialize` stores `static_options = options` and
+// `static_environment_options = environment_options` (which retain pointers to
+// strings owned by the environment), plus `static_neuron_adapter`. Therefore
+// the environment/options are deliberately NOT destroyed after the call:
+// destroying them would leave the dispatch holding dangling references, and
+// later diagnostic stages will reuse these handles.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void* npdOpen(const char* path) {
+  void* handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+  if (handle == nullptr) {
+    const char* err = dlerror();
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "dlopen %s failed: %s", path,
+                        err == nullptr ? "?" : err);
+  }
+  return handle;
+}
+
+void* npdSym(void* handle, const char* name, std::string& error) {
+  void* sym = dlsym(handle, name);
+  if (sym == nullptr) {
+    const char* err = dlerror();
+    error = std::string("dlsym ") + name + " failed: " + (err == nullptr ? "?" : err);
+    __android_log_print(ANDROID_LOG_ERROR, kTag, "%s", error.c_str());
+  }
+  return sym;
+}
+
+}  // namespace
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_handshakeNative(
     JNIEnv* env, jclass /*clazz*/, jstring libraryPath) {
   std::string json = handshakeJson(jstringToStd(env, libraryPath));
+  return env->NewStringUTF(json.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initializeDispatchNative(
+    JNIEnv* env, jclass /*clazz*/, jstring coreLibraryPath, jstring dispatchLibraryPath,
+    jstring nativeLibraryDir) {
+  std::string corePath = jstringToStd(env, coreLibraryPath);
+  std::string dispatchPath = jstringToStd(env, dispatchLibraryPath);
+  std::string libraryDir = jstringToStd(env, nativeLibraryDir);
+
+  std::string error;
+  void* core = npdOpen(corePath.c_str());
+  if (core == nullptr) {
+    error = "core dlopen failed";
+  }
+  void* dispatch = core == nullptr ? nullptr : npdOpen(dispatchPath.c_str());
+  if (dispatch == nullptr && error.empty()) {
+    error = "dispatch dlopen failed";
+  }
+
+  NpdCreateEnvironmentFn createEnvironment = nullptr;
+  NpdCreateOptionsFn createOptions = nullptr;
+  NpdGetStatusStringFn getStatusString = nullptr;
+  NpdDispatchInitializeFn dispatchInitialize = nullptr;
+  if (error.empty()) {
+    createEnvironment = reinterpret_cast<NpdCreateEnvironmentFn>(
+        npdSym(core, "LiteRtCreateEnvironment", error));
+  }
+  if (error.empty()) {
+    createOptions =
+        reinterpret_cast<NpdCreateOptionsFn>(npdSym(core, "LiteRtCreateOptions", error));
+  }
+  if (error.empty()) {
+    getStatusString = reinterpret_cast<NpdGetStatusStringFn>(
+        npdSym(core, "LiteRtGetStatusString", error));
+  }
+  if (error.empty()) {
+    dispatchInitialize = reinterpret_cast<NpdDispatchInitializeFn>(
+        npdSym(dispatch, "LiteRtDispatchInitialize", error));
+  }
+
+  NpdOpaque environment = nullptr;
+  NpdOpaque options = nullptr;
+  int initStatus = -1;
+  if (error.empty()) {
+    NpdEnvOption envOption = {};
+    envOption.tag = 1;          // kLiteRtEnvOptionTagDispatchLibraryDir
+    envOption.value.type = 8;   // kLiteRtAnyTypeString
+    envOption.value.value.str_value = libraryDir.c_str();
+    int envStatus =
+        createEnvironment(1, &envOption, &environment);
+    if (envStatus != 0) {
+      error = std::string("LiteRtCreateEnvironment status ") + std::to_string(envStatus);
+    }
+  }
+  if (error.empty()) {
+    int optsStatus = createOptions(&options);
+    if (optsStatus != 0) {
+      error = std::string("LiteRtCreateOptions status ") + std::to_string(optsStatus);
+    }
+  }
+  if (error.empty()) {
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "LiteRtDispatchInitialize: env=%p options=%p dispatchLibraryDir=%s",
+                        environment, options, libraryDir.c_str());
+    initStatus = dispatchInitialize(environment, options);
+    const char* statusStr = getStatusString == nullptr ? nullptr : getStatusString(initStatus);
+    __android_log_print(ANDROID_LOG_INFO, kTag,
+                        "LiteRtDispatchInitialize status=%d string=%s", initStatus,
+                        statusStr == nullptr ? "?" : statusStr);
+    // Diagnostic-only: do NOT destroy environment/options here — the MediaTek
+    // dispatch keeps references to both beyond initialize (see source note).
+  }
+
+  std::string json = "{\"status\":\"";
+  json += (error.empty() && initStatus == 0) ? "OK" : "ERROR";
+  json += "\",\"initStatus\":" + std::to_string(initStatus);
+  json += ",\"statusString\":\"";
+  if (error.empty() && getStatusString != nullptr) {
+    const char* s = getStatusString(initStatus);
+    json += s == nullptr ? "" : escapeJson(s);
+  }
+  json += "\",\"error\":\"";
+  json += escapeJson(error);
+  json += "\"}";
   return env->NewStringUTF(json.c_str());
 }
