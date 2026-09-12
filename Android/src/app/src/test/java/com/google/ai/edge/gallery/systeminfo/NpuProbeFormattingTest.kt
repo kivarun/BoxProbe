@@ -48,6 +48,7 @@ class NpuProbeFormattingTest {
         "PRECHECK",
         "LITERT_CORE_LIBRARY_LOAD",
         "DISPATCH_LIBRARY_LOAD",
+        "DISPATCH_API_HANDSHAKE",
         "BACKEND_CREATED",
         "ENGINE_CREATED",
         "ENGINE_INITIALIZED",
@@ -128,6 +129,64 @@ class NpuProbeFormattingTest {
       "Failed at LITERT_CORE_LIBRARY_LOAD",
       npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_FAILED, probeResult),
     )
+  }
+
+  @Test
+  fun runtimeValidatedLabel_diagnosticStopAfterHandshake_showsHandshake() {
+    val probeResult =
+      result(
+        stages =
+          listOf(
+            passedStage(NpuProbeStage.PRECHECK),
+            passedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD),
+            passedStage(NpuProbeStage.DISPATCH_API_HANDSHAKE),
+          ),
+        failedStage = null,
+        stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
+      )
+    assertEquals(
+      "Core + dispatch + API handshake",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, probeResult),
+    )
+  }
+
+  @Test
+  fun handshakeRows_showVersionAndInterfacePresence() {
+    val rows =
+      npuProbeHandshakeRows(
+        NpuDispatchHandshakeBridge.HandshakeResult(
+          status = "OK",
+          major = 0,
+          minor = 1,
+          patch = 0,
+          interfacePresent = true,
+          asyncPresent = false,
+          graphPresent = false,
+        ),
+      )
+    assertEquals(
+      listOf(
+        "Dispatch API status" to "OK",
+        "API version" to "0.1.0",
+        "Basic interface" to "present",
+        "Async interface" to "absent",
+        "Graph interface" to "absent",
+      ),
+      rows,
+    )
+  }
+
+  @Test
+  fun handshakeRows_includeRawErrorWhenPresent() {
+    val rows =
+      npuProbeHandshakeRows(
+        NpuDispatchHandshakeBridge.HandshakeResult(
+          status = "ERROR",
+          error = "dlopen failed: nope",
+        ),
+      )
+    assertEquals(6, rows.size)
+    assertEquals("Handshake raw error" to "dlopen failed: nope", rows.last())
   }
 
   @Test

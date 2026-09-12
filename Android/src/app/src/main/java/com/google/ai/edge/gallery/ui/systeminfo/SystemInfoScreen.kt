@@ -51,6 +51,7 @@ import com.google.ai.edge.gallery.systeminfo.RuntimeVendor
 import com.google.ai.edge.gallery.systeminfo.SystemInfoSnapshot
 import com.google.ai.edge.gallery.systeminfo.VulkanSnapshot
 import com.google.ai.edge.gallery.systeminfo.npuProbeFormatDuration
+import com.google.ai.edge.gallery.systeminfo.npuProbeHandshakeRows
 import com.google.ai.edge.gallery.systeminfo.npuProbeRuntimeValidatedLabel
 import com.google.ai.edge.gallery.systeminfo.npuProbeStageLabel
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
@@ -371,6 +372,11 @@ private fun NpuProbePanel(
     InfoRow("Total duration", npuProbeFormatDuration(result.totalDurationMs))
     for (stage in result.stageResults) {
       InfoRow("Stage ${stage.stage.name}", npuProbeStageLabel(stage), monospace = !stage.passed)
+    }
+    result.dispatchHandshake?.let { handshake ->
+      for ((label, value) in npuProbeHandshakeRows(handshake)) {
+        InfoRow(label, value, monospace = label == "Handshake raw error")
+      }
     }
     val failedStageResult = result.stageResults.lastOrNull { !it.passed }
     if (failedStageResult != null) {

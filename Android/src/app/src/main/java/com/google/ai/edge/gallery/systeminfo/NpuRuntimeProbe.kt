@@ -10,6 +10,7 @@ enum class NpuProbeStage {
   PRECHECK,
   LITERT_CORE_LIBRARY_LOAD,
   DISPATCH_LIBRARY_LOAD,
+  DISPATCH_API_HANDSHAKE,
   BACKEND_CREATED,
   ENGINE_CREATED,
   ENGINE_INITIALIZED,
@@ -63,13 +64,15 @@ data class NpuProbeResult(
   val stageResults: List<NpuProbeStageResult>,
   /** Stage where the probe stopped, or null when every stage passed (SUCCESS). */
   val failedStage: NpuProbeStage?,
-  /**
-   * Last executed stage for diagnostic runs that intentionally stop before the
-   * full initialization path, or null when the run ran through.
-   */
-  val stoppedAfterStage: NpuProbeStage? = null,
-  val totalDurationMs: Long,
-)
+    /**
+     * Last executed stage for diagnostic runs that intentionally stop before the
+     * full initialization path, or null when the run ran through.
+     */
+    val stoppedAfterStage: NpuProbeStage? = null,
+    /** Dispatch API handshake diagnostics, when the handshake stage ran. */
+    val dispatchHandshake: NpuDispatchHandshakeBridge.HandshakeResult? = null,
+    val totalDurationMs: Long,
+  )
 
 /**
  * Active diagnostic probe of the LiteRT-LM NPU backend.
@@ -161,15 +164,48 @@ object NpuRuntimeProbe {
         t
       }
     stageResults.add(stageResult(NpuProbeStage.DISPATCH_LIBRARY_LOAD, loadStart, loadError))
+    if (loadError != null) {
+      return NpuProbeResult(
+        precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
+        stageResults = stageResults,
+        failedStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+        stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+        totalDurationMs = elapsedSince(startTotal),
+      )
+    }
 
-    // Diagnostic build: the probe always stops here, engine initialization is a
-    // separate later increment.
+    // --- Stage 4: DISPATCH_API_HANDSHAKE (dlsym + LiteRtDispatchGetApi only). ---
+    // The native bridge dlopens the already-loaded dispatch library, resolves
+    // LiteRtDispatchGetApi and returns the API version plus null-ness of the
+    // interface pointers. It never calls initialize and never touches Neuron.
+    val handshakeStart = SystemClock.elapsedRealtime()
+    var handshakeError: Throwable? = null
+    var handshake: NpuDispatchHandshakeBridge.HandshakeResult? = null
+    try {
+      val json = NpuDispatchHandshakeBridge.handshake(dispatchPath)
+      handshake =
+        NpuDispatchHandshakeBridge.parse(json)
+          ?: throw IllegalStateException("Dispatch handshake: unparsable result: $json")
+      if (handshake.status != "OK") {
+        throw IllegalStateException(
+          "Dispatch handshake failed: ${handshake.error.ifEmpty { "status=${handshake.status}" }}"
+        )
+      }
+    } catch (t: Throwable) {
+      handshakeError = t
+    }
+    stageResults.add(
+      stageResult(NpuProbeStage.DISPATCH_API_HANDSHAKE, handshakeStart, handshakeError)
+    )
+
+    // Diagnostic build: the probe always stops here, dispatch initialization
+    // (Neuron) is a separate later increment.
     return NpuProbeResult(
       precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
       stageResults = stageResults,
-      failedStage =
-        loadError?.let { NpuProbeStage.DISPATCH_LIBRARY_LOAD },
-      stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+      failedStage = handshakeError?.let { NpuProbeStage.DISPATCH_API_HANDSHAKE },
+      stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
+      dispatchHandshake = handshake,
       totalDurationMs = elapsedSince(startTotal),
     )
   }

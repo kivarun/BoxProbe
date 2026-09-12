@@ -6,6 +6,9 @@ fun npuProbeRuntimeValidatedLabel(status: NpuProbeStatus, result: NpuProbeResult
     status == NpuProbeStatus.INITIALIZATION_FAILED ->
       result?.failedStage?.let { "Failed at ${it.name}" } ?: "Initialization failed"
     status == NpuProbeStatus.INITIALIZATION_PASSED &&
+      result?.stoppedAfterStage == NpuProbeStage.DISPATCH_API_HANDSHAKE ->
+      "Core + dispatch + API handshake"
+    status == NpuProbeStatus.INITIALIZATION_PASSED &&
       result?.stoppedAfterStage == NpuProbeStage.DISPATCH_LIBRARY_LOAD ->
       "Core + dispatch loaded"
     else -> npuProbeStatusLabel(status)
@@ -38,3 +41,20 @@ fun npuProbeStageLabel(result: NpuProbeStageResult): String =
 
 fun npuProbeFormatDuration(millis: Long): String =
   if (millis >= 1000) "%.2f s".format(millis / 1000.0) else "$millis ms"
+
+/**
+ * Diagnostic rows for the dispatch API handshake (order matches the UI),
+ * e.g. "API version" -> "0.1.0", "Async interface" -> "absent"/"present".
+ */
+fun npuProbeHandshakeRows(handshake: NpuDispatchHandshakeBridge.HandshakeResult): List<Pair<String, String>> {
+  val rows = mutableListOf<Pair<String, String>>()
+  rows.add("Dispatch API status" to handshake.status)
+  rows.add("API version" to "${handshake.major}.${handshake.minor}.${handshake.patch}")
+  rows.add("Basic interface" to if (handshake.interfacePresent) "present" else "absent")
+  rows.add("Async interface" to if (handshake.asyncPresent) "present" else "absent")
+  rows.add("Graph interface" to if (handshake.graphPresent) "present" else "absent")
+  if (handshake.error.isNotEmpty()) {
+    rows.add("Handshake raw error" to handshake.error)
+  }
+  return rows
+}
