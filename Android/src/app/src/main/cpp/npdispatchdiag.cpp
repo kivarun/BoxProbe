@@ -227,17 +227,26 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
   NpdCreateOptionsFn createOptions = nullptr;
   NpdGetStatusStringFn getStatusString = nullptr;
   NpdDispatchInitializeFn dispatchInitialize = nullptr;
+  std::string optionalError;
   if (error.empty()) {
     createEnvironment = reinterpret_cast<NpdCreateEnvironmentFn>(
         npdSym(core, "LiteRtCreateEnvironment", error));
   }
   if (error.empty()) {
+    // LiteRtCreateOptions / LiteRtGetStatusString are compiler-side APIs and
+    // are NOT exported by the runtime libLiteRt.so. Their absence is not an
+    // error: an empty options list is represented as nullptr (the MediaTek
+    // initialize at revision 0b1b17f treats nullptr options and empty opaque
+    // options identically, and only assigns static_options without reading it),
+    // and the numeric status is reported without a string mapping.
     createOptions =
-        reinterpret_cast<NpdCreateOptionsFn>(npdSym(core, "LiteRtCreateOptions", error));
+        reinterpret_cast<NpdCreateOptionsFn>(npdSym(core, "LiteRtCreateOptions", optionalError));
+    optionalError.clear();
   }
   if (error.empty()) {
     getStatusString = reinterpret_cast<NpdGetStatusStringFn>(
-        npdSym(core, "LiteRtGetStatusString", error));
+        npdSym(core, "LiteRtGetStatusString", optionalError));
+    optionalError.clear();
   }
   if (error.empty()) {
     dispatchInitialize = reinterpret_cast<NpdDispatchInitializeFn>(
@@ -246,6 +255,7 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
 
   NpdOpaque environment = nullptr;
   NpdOpaque options = nullptr;
+  bool optionsCreated = false;
   int initStatus = -1;
   if (error.empty()) {
     NpdEnvOption envOption = {};
@@ -258,16 +268,18 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
       error = std::string("LiteRtCreateEnvironment status ") + std::to_string(envStatus);
     }
   }
-  if (error.empty()) {
+  if (error.empty() && createOptions != nullptr) {
     int optsStatus = createOptions(&options);
     if (optsStatus != 0) {
       error = std::string("LiteRtCreateOptions status ") + std::to_string(optsStatus);
+    } else {
+      optionsCreated = true;
     }
   }
   if (error.empty()) {
     __android_log_print(ANDROID_LOG_INFO, kTag,
-                        "LiteRtDispatchInitialize: env=%p options=%p dispatchLibraryDir=%s",
-                        environment, options, libraryDir.c_str());
+                        "LiteRtDispatchInitialize: env=%p options=%p (created=%d) dispatchLibraryDir=%s",
+                        environment, options, optionsCreated ? 1 : 0, libraryDir.c_str());
     initStatus = dispatchInitialize(environment, options);
     const char* statusStr = getStatusString == nullptr ? nullptr : getStatusString(initStatus);
     __android_log_print(ANDROID_LOG_INFO, kTag,
@@ -280,6 +292,8 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
   std::string json = "{\"status\":\"";
   json += (error.empty() && initStatus == 0) ? "OK" : "ERROR";
   json += "\",\"initStatus\":" + std::to_string(initStatus);
+  json += ",\"optionsCreated\":";
+  json += optionsCreated ? "true" : "false";
   json += ",\"statusString\":\"";
   if (error.empty() && getStatusString != nullptr) {
     const char* s = getStatusString(initStatus);

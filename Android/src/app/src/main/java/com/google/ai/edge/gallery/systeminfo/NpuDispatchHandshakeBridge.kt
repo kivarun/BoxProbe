@@ -24,6 +24,7 @@ data class NpuDispatchHandshakeResult(
 data class NpuDispatchInitializeResult(
   val status: String = "",
   val initStatus: Int = 0,
+  val optionsCreated: Boolean = false,
   val statusString: String = "",
   val error: String = "",
 )
