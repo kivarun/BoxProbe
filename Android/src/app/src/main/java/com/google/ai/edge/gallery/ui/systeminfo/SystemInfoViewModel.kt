@@ -3,9 +3,7 @@ package com.google.ai.edge.gallery.ui.systeminfo
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.ai.edge.gallery.data.Accelerator
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.RuntimeType
 import com.google.ai.edge.gallery.systeminfo.NpuProbeResult
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
 import com.google.ai.edge.gallery.systeminfo.NpuRuntimeProbe
@@ -18,6 +16,8 @@ import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -44,6 +44,8 @@ constructor(
   private val _npuProbeState = MutableStateFlow(NpuProbeUiState())
   val npuProbeState = _npuProbeState.asStateFlow()
 
+  private var availabilityObservationStarted = false
+
   init {
     collect()
   }
@@ -56,6 +58,23 @@ constructor(
         withContext(Dispatchers.Default) { SystemInfoCollector.collect(appContext) }
       _snapshot.value = result
       _collecting.value = false
+    }
+  }
+
+  /**
+   * Observes [ModelManagerViewModel.uiState] and re-evaluates NPU model availability
+   * whenever the stable [NpuModelAvailabilityKey] changes: download completion, model
+   * deletion, model import and allowlist load completion all change the key. Download
+   * progress updates do not change the key, so availability is not recomputed per byte.
+   */
+  fun observeNpuModelAvailability(modelManagerViewModel: ModelManagerViewModel) {
+    if (availabilityObservationStarted) return
+    availabilityObservationStarted = true
+    viewModelScope.launch {
+      modelManagerViewModel.uiState
+        .map { NpuModelAvailabilityKey.of(it) }
+        .distinctUntilChanged()
+        .collect { refreshNpuModelAvailability(modelManagerViewModel) }
     }
   }
 
@@ -105,16 +124,10 @@ constructor(
   }
 
   /**
-   * First downloaded LiteRT-LM model whose allowlist permits the NPU path (NPU/TPU),
+   * First downloaded model that is an NPU probe candidate ([isNpuCompatibleCandidate]),
    * or null. Deterministic: the first model in sorted display-name order.
    */
   private fun selectNpuCompatibleModel(
     modelManagerViewModel: ModelManagerViewModel,
-  ): Model? =
-    modelManagerViewModel.getAllDownloadedModels()
-      .filter { it.runtimeType == RuntimeType.LITERT_LM }
-      .filter {
-        it.accelerators.contains(Accelerator.NPU) || it.accelerators.contains(Accelerator.TPU)
-      }
-      .firstOrNull()
+  ): Model? = modelManagerViewModel.getAllDownloadedModels().firstOrNull(::isNpuCompatibleCandidate)
 }

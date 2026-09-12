@@ -220,7 +220,7 @@ private fun AiRuntimeSection(
   modelManagerViewModel: ModelManagerViewModel,
 ) {
   val npuProbeState by viewModel.npuProbeState.collectAsState()
-  LaunchedEffect(Unit) { viewModel.refreshNpuModelAvailability(modelManagerViewModel) }
+  LaunchedEffect(Unit) { viewModel.observeNpuModelAvailability(modelManagerViewModel) }
 
   Section("AI runtime") {
     Text(
