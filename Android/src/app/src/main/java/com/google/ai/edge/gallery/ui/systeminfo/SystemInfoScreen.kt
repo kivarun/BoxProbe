@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -21,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -31,10 +33,15 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.systeminfo.DeviceMatchStatus
 import com.google.ai.edge.gallery.systeminfo.GpuSnapshot
+import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
 import com.google.ai.edge.gallery.systeminfo.ProbeStatus
 import com.google.ai.edge.gallery.systeminfo.RuntimeVendor
 import com.google.ai.edge.gallery.systeminfo.SystemInfoSnapshot
 import com.google.ai.edge.gallery.systeminfo.VulkanSnapshot
+import com.google.ai.edge.gallery.systeminfo.npuProbeFormatDuration
+import com.google.ai.edge.gallery.systeminfo.npuProbeRuntimeValidatedLabel
+import com.google.ai.edge.gallery.systeminfo.npuProbeStageLabel
+import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import java.text.DateFormat
 import java.util.Date
 
@@ -50,6 +57,7 @@ import java.util.Date
 fun SystemInfoScreen(
   onBackClicked: () -> Unit,
   viewModel: SystemInfoViewModel = hiltViewModel(),
+  modelManagerViewModel: ModelManagerViewModel = hiltViewModel(),
 ) {
   val snapshot by viewModel.snapshot.collectAsState()
   val collecting by viewModel.collecting.collectAsState()
@@ -98,7 +106,7 @@ fun SystemInfoScreen(
         CpuMemorySection(snap)
         GpuSection(snap.gpu)
         VulkanSection(snap.vulkan)
-        AiRuntimeSection(snap)
+        AiRuntimeSection(snap, viewModel, modelManagerViewModel)
         NativeLibrariesSection(snap)
       } ?: run {
         Text("Collecting device information…", style = MaterialTheme.typography.bodyMedium)
@@ -206,7 +214,14 @@ private fun VulkanSection(vulkan: VulkanSnapshot) {
 }
 
 @Composable
-private fun AiRuntimeSection(snapshot: SystemInfoSnapshot) {
+private fun AiRuntimeSection(
+  snapshot: SystemInfoSnapshot,
+  viewModel: SystemInfoViewModel,
+  modelManagerViewModel: ModelManagerViewModel,
+) {
+  val npuProbeState by viewModel.npuProbeState.collectAsState()
+  LaunchedEffect(Unit) { viewModel.refreshNpuModelAvailability(modelManagerViewModel) }
+
   Section("AI runtime") {
     Text(
       "Bundled .so files do NOT prove the NPU runtime works on this device.",
@@ -214,6 +229,7 @@ private fun AiRuntimeSection(snapshot: SystemInfoSnapshot) {
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     for (vendorStatus in snapshot.vendorStatuses) {
+      val deviceMatched = vendorStatus.deviceMatch == DeviceMatchStatus.YES
       Column(
         modifier = Modifier.padding(top = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -225,8 +241,70 @@ private fun AiRuntimeSection(snapshot: SystemInfoSnapshot) {
         )
         InfoRow("Bundled", if (vendorStatus.bundled) "yes" else "no")
         InfoRow("Device match", matchLabel(vendorStatus.deviceMatch))
-        InfoRow("Runtime validated", vendorStatus.runtimeValidated)
+        InfoRow(
+          "Runtime validated",
+          if (deviceMatched) {
+            npuProbeRuntimeValidatedLabel(npuProbeState.status, npuProbeState.result)
+          } else {
+            vendorStatus.runtimeValidated
+          },
+        )
+        if (deviceMatched) {
+          NpuProbePanel(
+            state = npuProbeState,
+            onRunProbe = { viewModel.runNpuProbe(modelManagerViewModel) },
+          )
+        }
       }
+    }
+  }
+}
+
+@Composable
+private fun NpuProbePanel(state: NpuProbeUiState, onRunProbe: () -> Unit) {
+  if (state.status == NpuProbeStatus.RUNNING) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+      Text("Probing NPU initialization…", style = MaterialTheme.typography.bodySmall)
+    }
+    return
+  }
+
+  Button(onClick = onRunProbe, enabled = state.selectedModelName != null) {
+    Text("Probe NPU", style = MaterialTheme.typography.labelLarge)
+  }
+
+  val result = state.result ?: return
+  val precheck = result.precheck ?: return
+  Column(
+    modifier = Modifier.padding(top = 4.dp),
+    verticalArrangement = Arrangement.spacedBy(2.dp),
+  ) {
+    InfoRow("Selected model", state.selectedModelName ?: "—")
+    InfoRow("Requested backend", "NPU")
+    InfoRow("nativeLibraryDir", precheck.nativeLibraryDir, monospace = true)
+    InfoRow("Model path", precheck.modelPath, monospace = true)
+    InfoRow("Directory exists", if (precheck.directoryExists) "yes" else "no")
+    InfoRow("Directory readable", if (precheck.directoryReadable) "yes" else "no")
+    InfoRow("Visible .so count", precheck.visibleSoCount.toString())
+    if (precheck.visibleSoNames.isNotEmpty()) {
+      InfoRow("Visible .so names", precheck.visibleSoNames.joinToString("\n"), monospace = true)
+    }
+    InfoRow("Total duration", npuProbeFormatDuration(result.totalDurationMs))
+    for (stage in result.stageResults) {
+      InfoRow("Stage ${stage.stage.name}", npuProbeStageLabel(stage), monospace = !stage.passed)
+    }
+    val failedStageResult = result.stageResults.lastOrNull { !it.passed }
+    if (failedStageResult != null) {
+      InfoRow(
+        "Raw error",
+        listOfNotNull(failedStageResult.exceptionClass, failedStageResult.exceptionMessage)
+          .joinToString(": "),
+        monospace = true,
+      )
     }
   }
 }
