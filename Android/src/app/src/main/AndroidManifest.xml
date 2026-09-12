@@ -66,14 +66,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- This is for deep linking -->
+            <!-- This is for deep linking (exact authority keeps AppAuth redirects for
+                 scheme com.kivarun.boxprobe exclusive to RedirectUriReceiverActivity) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
 
-                <data android:scheme="com.kivarun.boxprobe" />
+                <data
+                    android:scheme="com.kivarun.boxprobe"
+                    android:host="global_model_manager" />
             </intent-filter>
         </activity>
 

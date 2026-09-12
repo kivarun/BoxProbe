@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
@@ -24,6 +26,27 @@ plugins {
   alias(libs.plugins.oss.licenses)
   kotlin("kapt")
 }
+
+/**
+ * Hugging Face OAuth configuration, provided through root local.properties (not committed):
+ *   HF_CLIENT_ID     — client id of the registered Hugging Face OAuth app
+ *   HF_REDIRECT_URI  — registered redirect URI (e.g. com.kivarun.boxprobe://oauthredirect)
+ *
+ * When not configured the AppAuth flow stays on placeholders (login is unavailable),
+ * but the build still succeeds.
+ */
+val localProperties = Properties().apply {
+  val file = rootProject.file("local.properties")
+  if (file.exists()) {
+    file.inputStream().use { load(it) }
+  }
+}
+val hfClientId: String =
+  localProperties.getProperty("HF_CLIENT_ID")
+    ?: "REPLACE_WITH_YOUR_CLIENT_ID_IN_HUGGINGFACE_APP"
+val hfRedirectUri: String =
+  localProperties.getProperty("HF_REDIRECT_URI")
+    ?: "REPLACE_WITH_YOUR_REDIRECT_URI_IN_HUGGINGFACE_APP"
 
 /**
  * Resolves the git commit exposed through BuildConfig.GIT_COMMIT.
@@ -67,11 +90,10 @@ android {
       "\"${resolveGitCommit().replace("\\", "\\\\").replace("\"", "\\\"")}\"",
     )
 
-    // Needed for HuggingFace auth workflows.
-    // Use the scheme of the "Redirect URLs" in HuggingFace app.
-    manifestPlaceholders["appAuthRedirectScheme"] =
-        "REPLACE_WITH_YOUR_REDIRECT_SCHEME_IN_HUGGINGFACE_APP"
-    // No applicationName placeholder needed - AndroidManifest.xml directly references the class
+    // Hugging Face AppAuth OAuth: scheme must match the registered redirect URI.
+    manifestPlaceholders["appAuthRedirectScheme"] = hfRedirectUri.substringBefore("://")
+    buildConfigField("String", "HF_CLIENT_ID", "\"${hfClientId}\"")
+    buildConfigField("String", "HF_REDIRECT_URI", "\"${hfRedirectUri}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
