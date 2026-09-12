@@ -196,6 +196,49 @@ void* npdSym(void* handle, const char* name, std::string& error) {
   return sym;
 }
 
+// Adapter candidates probed by the MediaTek initialize (upstream
+// neuron_adapter_api.cc, revision 0b1b17f). The upstream wrapper does not log
+// dlerror per candidate, so the diagnostic pre-scan records it verbatim.
+// Successfully opened libraries are kept loaded (no dlclose): the following
+// initialize step reuses them.
+constexpr const char* kAdapterCandidates[] = {
+    "libneuronusdk_adapter.mtk.so",
+    "libneuronusdk_adapter.9.mtk.so",
+    "libneuronusdk_adapter.so",
+    "libneuron_adapter_mgvi.so",
+    "libneuron_adapter.so",
+    "libneuron_sys_util.mtk.so",
+};
+
+std::string probeAdapterCandidates(const std::string& nativeLibraryDir) {
+  std::string json = "[";
+  bool first = true;
+  for (const char* name : kAdapterCandidates) {
+    std::string entryName = name;
+    // Also probe the app-managed variant with an absolute path, mirroring the
+    // last upstream candidate `<sharedLibraryDir>/libneuron_adapter.so`.
+    std::string path = name;
+    if (name == std::string("libneuron_adapter.so")) {
+      path = nativeLibraryDir + "/" + name;
+      entryName = "<nativeLibraryDir>/libneuron_adapter.so";
+    }
+    void* handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    const char* err = handle == nullptr ? dlerror() : nullptr;
+    __android_log_print(
+        ANDROID_LOG_INFO, kTag, "adapter probe %s -> %s", entryName.c_str(),
+        handle != nullptr ? "ok" : (err == nullptr ? "failed" : err));
+    if (!first) json += ",";
+    first = false;
+    json += "{\"name\":\"" + escapeJson(entryName) + "\",\"ok\":";
+    json += handle != nullptr ? "true" : "false";
+    json += ",\"error\":\"";
+    json += handle != nullptr ? "" : escapeJson(err == nullptr ? "failed" : err);
+    json += "\"}";
+  }
+  json += "]";
+  return json;
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -257,6 +300,10 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
   NpdOpaque options = nullptr;
   bool optionsCreated = false;
   int initStatus = -1;
+  std::string adapterProbeJson = "[]";
+  if (error.empty()) {
+    adapterProbeJson = probeAdapterCandidates(libraryDir);
+  }
   if (error.empty()) {
     NpdEnvOption envOption = {};
     envOption.tag = 1;          // kLiteRtEnvOptionTagDispatchLibraryDir
@@ -292,8 +339,10 @@ Java_com_google_ai_edge_gallery_systeminfo_NpuDispatchHandshakeBridge_initialize
   std::string json = "{\"status\":\"";
   json += (error.empty() && initStatus == 0) ? "OK" : "ERROR";
   json += "\",\"initStatus\":" + std::to_string(initStatus);
-  json += ",\"optionsCreated\":";
+  json += "\",\"optionsCreated\":";
   json += optionsCreated ? "true" : "false";
+  json += ",\"adapterProbe\":";
+  json += adapterProbeJson;
   json += ",\"statusString\":\"";
   if (error.empty() && getStatusString != nullptr) {
     const char* s = getStatusString(initStatus);

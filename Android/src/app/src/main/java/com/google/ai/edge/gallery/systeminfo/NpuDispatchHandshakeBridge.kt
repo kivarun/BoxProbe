@@ -27,6 +27,14 @@ data class NpuDispatchInitializeResult(
   val optionsCreated: Boolean = false,
   val statusString: String = "",
   val error: String = "",
+  val adapterProbe: List<NpuAdapterProbeEntry> = emptyList(),
+)
+
+/** One adapter candidate dlopen probe: name, success flag, raw dlerror. */
+data class NpuAdapterProbeEntry(
+  val name: String = "",
+  val ok: Boolean = false,
+  val error: String = "",
 )
 
 private val gson = Gson()

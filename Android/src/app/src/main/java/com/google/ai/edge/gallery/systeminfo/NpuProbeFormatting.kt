@@ -78,6 +78,16 @@ fun npuProbeInitializeRows(initialize: NpuDispatchInitializeResult): List<Pair<S
         .joinToString(" — ")
     }
   rows.add("Dispatch initialize" to value)
+  if (initialize.adapterProbe.isNotEmpty()) {
+    rows.add(
+      "Adapter probe" to
+        initialize.adapterProbe.joinToString("\n") { entry ->
+          val status = if (entry.ok) "ok" else "fail"
+          entry.name + " → " + status +
+            (if (entry.error.isNotEmpty()) " (${"dlerror"}: ${entry.error})" else "")
+        },
+    )
+  }
   if (initialize.error.isNotEmpty()) {
     rows.add("Initialize raw error" to initialize.error)
   }
