@@ -16,19 +16,9 @@
 
 package com.google.ai.edge.gallery.data
 
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.util.Log
-import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.core.os.bundleOf
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -36,7 +26,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.google.ai.edge.gallery.AppLifecycleProvider
 import com.google.ai.edge.gallery.R
 import com.google.ai.edge.gallery.worker.DownloadWorker
 import java.util.UUID
@@ -76,10 +65,7 @@ private const val DOWNLOAD_FROM_GLOBAL_MODEL_MANAGER_TASK_ID = "___"
  * progress, and retrieve information about enqueued or running download tasks. It utilizes
  * WorkManager to handle background download operations.
  */
-class DefaultDownloadRepository(
-  private val context: Context,
-  private val lifecycleProvider: AppLifecycleProvider,
-) : DownloadRepository {
+class DefaultDownloadRepository(private val context: Context) : DownloadRepository {
   private val workManager = WorkManager.getInstance(context)
   /**
    * Stores the start time of a model download.
@@ -202,12 +188,6 @@ class DefaultDownloadRepository(
           WorkInfo.State.SUCCEEDED -> {
             Log.d("repo", "worker %s success".format(workerId.toString()))
             onStatusUpdated(model, ModelDownloadStatus(status = ModelDownloadStatusType.SUCCEEDED))
-            sendNotification(
-              title = context.getString(R.string.notification_title_success),
-              text = context.getString(R.string.notification_content_success).format(model.name),
-              taskId = task?.id ?: DOWNLOAD_FROM_GLOBAL_MODEL_MANAGER_TASK_ID,
-              modelName = model.name,
-            )
 
             val startTime = downloadStartTimeSharedPreferences.getLong(model.name, 0L)
             val duration = System.currentTimeMillis() - startTime
@@ -224,13 +204,6 @@ class DefaultDownloadRepository(
             )
             if (workInfo.state == WorkInfo.State.CANCELLED) {
               status = ModelDownloadStatusType.NOT_DOWNLOADED
-            } else {
-              sendNotification(
-                title = context.getString(R.string.notification_title_fail),
-                text = context.getString(R.string.notification_content_success).format(model.name),
-                taskId = "",
-                modelName = "",
-              )
             }
             onStatusUpdated(
               model,
@@ -246,76 +219,6 @@ class DefaultDownloadRepository(
           else -> {}
         }
       }
-    }
-  }
-
-  private fun sendNotification(title: String, text: String, taskId: String, modelName: String) {
-    // Don't send notification if app is in foreground.
-    if (lifecycleProvider.isAppInForeground) {
-      return
-    }
-
-    val channelId = "download_notification"
-    val channelName = "BoxProbe download notification"
-
-    // Create the NotificationChannel, but only on API 26+ because
-    // the NotificationChannel class is new and not in the support library
-    val importance = NotificationManager.IMPORTANCE_HIGH
-    val channel = NotificationChannel(channelId, channelName, importance)
-    val notificationManager: NotificationManager =
-      context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    notificationManager.createNotificationChannel(channel)
-
-    val intent: Intent
-    if (taskId.isEmpty()) {
-      // If taskId is empty, it's a failed download. Just open the app's main screen.
-      intent = context.packageManager.getLaunchIntentForPackage(context.packageName)!!
-    }
-    // Download from global model manager. Open the global model manager screen.
-    else if (taskId == DOWNLOAD_FROM_GLOBAL_MODEL_MANAGER_TASK_ID) {
-      intent =
-        Intent(Intent.ACTION_VIEW, "com.kivarun.boxprobe://global_model_manager".toUri())
-          .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
-    } else {
-
-      // Otherwise, create the deep link as before.
-      intent =
-        Intent(
-            Intent.ACTION_VIEW,
-            "com.kivarun.boxprobe://model/$taskId/${modelName}".toUri(),
-          )
-          .apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
-    }
-
-    // Create a PendingIntent
-    val pendingIntent: PendingIntent =
-      PendingIntent.getActivity(
-        context,
-        0,
-        intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-      )
-
-    val builder =
-      NotificationCompat.Builder(context, channelId)
-        // TODO: replace icon.
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setContentTitle(title)
-        .setContentText(text)
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
-        .setContentIntent(pendingIntent)
-        .setAutoCancel(true)
-
-    with(NotificationManagerCompat.from(context)) {
-      // notificationId is a unique int for each notification that you must define
-      if (
-        ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-          PackageManager.PERMISSION_GRANTED
-      ) {
-        // Permission not granted, return or handle accordingly. In real app, request permission.
-        return
-      }
-      notify(1, builder.build())
     }
   }
 }

@@ -153,10 +153,7 @@ internal object AppModule {
   // Provides DownloadRepository
   @Provides
   @Singleton
-  fun provideDownloadRepository(
-    @ApplicationContext context: Context,
-    lifecycleProvider: AppLifecycleProvider,
-  ): DownloadRepository {
-    return DefaultDownloadRepository(context, lifecycleProvider)
+  fun provideDownloadRepository(@ApplicationContext context: Context): DownloadRepository {
+    return DefaultDownloadRepository(context)
   }
 }

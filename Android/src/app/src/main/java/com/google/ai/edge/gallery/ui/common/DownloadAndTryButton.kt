@@ -63,7 +63,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -134,7 +133,6 @@ fun DownloadAndTryButton(
   canShowTryIt: Boolean = true,
 ) {
   val scope = rememberCoroutineScope()
-  val context = LocalContext.current
   var checkingToken by remember { mutableStateOf(false) }
   var showAgreementAckSheet by remember { mutableStateOf(false) }
   var showErrorDialog by remember { mutableStateOf(false) }
@@ -154,22 +152,10 @@ fun DownloadAndTryButton(
     )
   val needToDownloadFirst = controlState == ModelDownloadControlState.DOWNLOAD
 
-  // A launcher for requesting notification permission.
-  val permissionLauncher =
-    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-      modelManagerViewModel.downloadModel(task = task, model = model)
-    }
-
   // Function to kick off download.
   val startDownload: (accessToken: String?) -> Unit = { accessToken ->
     model.accessToken = accessToken
-    checkNotificationPermissionAndStartDownload(
-      context = context,
-      launcher = permissionLauncher,
-      modelManagerViewModel = modelManagerViewModel,
-      task = task,
-      model = model,
-    )
+    modelManagerViewModel.downloadModel(task = task, model = model)
     checkingToken = false
   }
 

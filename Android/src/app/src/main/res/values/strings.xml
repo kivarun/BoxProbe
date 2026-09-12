@@ -134,9 +134,6 @@
   <string name="name" translatable="false">Name</string>
   <string name="no_cutouts_collected" translatable="false">No cutouts collected</string>
   <string name="notification_content_fail" translatable="false">Failed to download model "%s"</string>
-  <string name="notification_content_success" translatable="false">Model "%s" has been downloaded</string>
-  <string name="notification_title_fail" translatable="false">Model download failed</string>
-  <string name="notification_title_success" translatable="false">Model download succeeded</string>
   <string name="ok" translatable="false">OK</string>
   <string name="paste_from_clipboard" translatable="false">Paste from clipboard</string>
   <string name="pick_from_album" translatable="false">Pick from album</string>

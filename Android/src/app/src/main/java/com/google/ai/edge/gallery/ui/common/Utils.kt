@@ -16,12 +16,8 @@
 
 package com.google.ai.edge.gallery.ui.common
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -50,11 +46,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.data.Task
-import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
 import java.io.File
 import kotlin.math.ln
 import kotlin.math.pow
@@ -162,29 +154,6 @@ fun Context.createTempPictureUri(
     "com.google.ai.edge.gallery.provider" /* {applicationId}.provider */,
     tempFile,
   )
-}
-
-fun checkNotificationPermissionAndStartDownload(
-  context: Context,
-  launcher: ManagedActivityResultLauncher<String, Boolean>,
-  modelManagerViewModel: ModelManagerViewModel,
-  task: Task?,
-  model: Model,
-) {
-  // Check permission
-  when (PackageManager.PERMISSION_GRANTED) {
-    // Already got permission. Call the lambda.
-    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) -> {
-      modelManagerViewModel.downloadModel(task = task, model = model)
-    }
-
-    // Otherwise, ask for permission
-    else -> {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-      }
-    }
-  }
 }
 
 fun ensureValidFileName(fileName: String): String {

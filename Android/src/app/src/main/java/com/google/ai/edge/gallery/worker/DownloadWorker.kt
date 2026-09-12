@@ -16,17 +16,10 @@
 
 package com.google.ai.edge.gallery.worker
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
-import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.google.ai.edge.gallery.data.KEY_MODEL_COMMIT_HASH
 import com.google.ai.edge.gallery.data.KEY_MODEL_DOWNLOAD_ACCESS_TOKEN
@@ -61,34 +54,9 @@ private const val TAG = "AGDownloadWorker"
 
 data class UrlAndFileName(val url: String, val fileName: String)
 
-private const val FOREGROUND_NOTIFICATION_CHANNEL_ID = "model_download_channel_foreground"
-private var channelCreated = false
-
 class DownloadWorker(context: Context, params: WorkerParameters) :
   CoroutineWorker(context, params) {
   private val externalFilesDir = context.getExternalFilesDir(null)
-
-  private val notificationManager =
-    context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-  // Unique notification id.
-  private val notificationId: Int = params.id.hashCode()
-
-  init {
-    if (!channelCreated) {
-      // Create a notification channel for showing notifications for model downloading progress.
-      val channel =
-        NotificationChannel(
-            FOREGROUND_NOTIFICATION_CHANNEL_ID,
-            "Model Downloading",
-            // Make it silent.
-            NotificationManager.IMPORTANCE_LOW,
-          )
-          .apply { description = "Notifications for model downloading" }
-      notificationManager.createNotificationChannel(channel)
-      channelCreated = true
-    }
-  }
 
   override suspend fun doWork(): Result {
     // Box: Block downloads when offline mode is enabled
@@ -120,9 +88,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
         Result.failure()
       } else {
         return@withContext try {
-          // Set the worker as a foreground service immediately.
-          setForeground(createForegroundInfo(progress = 0, modelName = modelName))
-
           // Collect data for all files.
           val allFiles: MutableList<UrlAndFileName> = mutableListOf()
           allFiles.add(UrlAndFileName(url = fileUrl, fileName = fileName))
@@ -246,12 +211,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
                     .putLong(KEY_MODEL_DOWNLOAD_REMAINING_MS, remainingMs.toLong())
                     .build()
                 )
-                setForeground(
-                  createForegroundInfo(
-                    progress = (downloadedBytes * 100 / totalBytes).toInt(),
-                    modelName = modelName,
-                  )
-                )
                 Log.d(TAG, "downloadedBytes: $downloadedBytes")
                 lastSetProgressTs = curTs
               }
@@ -329,52 +288,5 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
         }
       }
     }
-  }
-
-  override suspend fun getForegroundInfo(): ForegroundInfo {
-    // Initial progress is 0
-    return createForegroundInfo(0)
-  }
-
-  /**
-   * Creates a [ForegroundInfo] object for the download worker's ongoing notification. This
-   * notification is used to keep the worker running in the foreground, indicating to the user that
-   * an active download is in progress.
-   */
-  private fun createForegroundInfo(progress: Int, modelName: String? = null): ForegroundInfo {
-    // Create a notification for the foreground service
-    var title = "Downloading model"
-    if (modelName != null) {
-      title = "Downloading \"$modelName\""
-    }
-    val content = "Downloading in progress: $progress%"
-
-    val intent =
-      Intent(applicationContext, Class.forName("com.box.gallery.MainActivity")).apply {
-        flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-      }
-    val pendingIntent =
-      PendingIntent.getActivity(
-        applicationContext,
-        0,
-        intent,
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-      )
-
-    val notification =
-      NotificationCompat.Builder(applicationContext, FOREGROUND_NOTIFICATION_CHANNEL_ID)
-        .setContentTitle(title)
-        .setContentText(content)
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setOngoing(true) // Makes the notification non-dismissable
-        .setProgress(100, progress, false) // Show progress
-        .setContentIntent(pendingIntent)
-        .build()
-
-    return ForegroundInfo(
-      notificationId,
-      notification,
-      ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-    )
   }
 }
