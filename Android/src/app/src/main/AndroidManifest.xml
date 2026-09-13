@@ -100,6 +100,15 @@
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
         <uses-native-library android:name="libOpenCL.so" android:required="false"/>
         <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+
+        <!-- MediaTek Neuron runtime: the self-contained LiteRT MediaTek dispatch
+             dlopens these preinstalled libraries from /system_ext. Without these
+             entries the app namespace cannot resolve them and NPU init fails
+             with "Failed to load NeuronAdapter shared library". -->
+        <uses-native-library android:name="libneuronusdk_adapter.mtk.so" android:required="false"/>
+        <uses-native-library android:name="libneuronusdk_adapter.9.mtk.so" android:required="false"/>
+        <uses-native-library android:name="libneuron_sys_util.mtk.so" android:required="false"/>
+        <uses-native-library android:name="libneuron_adapter_mgvi.so" android:required="false"/>
     </application>
 
 </manifest>

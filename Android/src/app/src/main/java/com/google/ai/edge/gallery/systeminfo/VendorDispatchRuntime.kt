@@ -1,8 +1,12 @@
 package com.google.ai.edge.gallery.systeminfo
 
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import java.io.File
 import java.nio.file.Files
+
+private const val TAG = "VendorDispatchRuntime"
 
 /**
  * Vendor-isolated LiteRT dispatch runtime.
@@ -146,8 +150,7 @@ data class VendorDispatchPreparation(
 fun prepareVendorDispatchRuntime(
   context: Context,
   vendor: NpuDispatchVendor,
-): VendorDispatchPreparation {
-  val vendorDispatchDir = File(context.filesDir, "runtime-dispatch/${vendor.dirName}")
+): VendorDispatchPreparation {  val vendorDispatchDir = File(context.filesDir, "runtime-dispatch/${vendor.dirName}")
 
   val nativeLibraryDir: String = context.applicationInfo.nativeLibraryDir ?: ""
   if (nativeLibraryDir.isEmpty()) {
@@ -269,4 +272,38 @@ fun prepareVendorDispatchRuntime(
     symlinkMode = symlinkMode,
     errors = errors,
   )
+}
+
+/**
+ * Native library directory for the production NPU backend.
+ *
+ * Returns the vendor-isolated dispatch directory for this device's SoC when it can
+ * be prepared, falling back to the installer `nativeLibraryDir` otherwise. LiteRT
+ * discovers vendor dispatch runtimes inside the directory passed via
+ * `Backend.NPU(nativeLibraryDir = …)`, so a failed vendor isolation must never
+ * block the NPU path.
+ */
+fun npuNativeLibraryDirForDevice(context: Context): String {
+  val nativeLibraryDir = context.applicationInfo.nativeLibraryDir
+  val vendor =
+    npuDispatchVendorForDevice(
+      SocVendorDetector.detect(
+        socManufacturer = Build.SOC_MANUFACTURER ?: "",
+        socModel = Build.SOC_MODEL ?: "",
+      ),
+    )
+  if (vendor == null) {
+    Log.w(TAG, "SoC vendor not recognized for NPU dispatch isolation, using nativeLibraryDir")
+    return nativeLibraryDir
+  }
+  val preparation = prepareVendorDispatchRuntime(context, vendor)
+  if (!preparation.ok) {
+    Log.w(
+      TAG,
+      "Failed to prepare $vendor dispatch runtime, using nativeLibraryDir: " +
+        (preparation.errors + preparation.missingRequired).joinToString("; "),
+    )
+    return nativeLibraryDir
+  }
+  return preparation.vendorDispatchDir.absolutePath
 }

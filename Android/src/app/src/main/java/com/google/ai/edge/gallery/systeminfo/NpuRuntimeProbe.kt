@@ -3,15 +3,15 @@ package com.google.ai.edge.gallery.systeminfo
 import android.content.Context
 import android.os.SystemClock
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
 import java.io.File
 
 /** Stages of the active NPU initialization probe, in execution order. */
 enum class NpuProbeStage {
   PRECHECK,
-  LITERT_CORE_LIBRARY_LOAD,
-  DISPATCH_LIBRARY_LOAD,
-  DISPATCH_API_HANDSHAKE,
-  DISPATCH_INITIALIZE,
   BACKEND_CREATED,
   ENGINE_CREATED,
   ENGINE_INITIALIZED,
@@ -47,8 +47,6 @@ data class NpuProbePrecheck(
   val vendorDispatchDirExists: Boolean = false,
   val vendorDispatchVisibleSoCount: Int = 0,
   val vendorDispatchVisibleSoNames: List<String> = emptyList(),
-  /** Absolute path of the dispatch library loaded by the diagnostic dlopen stage. */
-  val dispatchLibraryPath: String = "",
 )
 
 enum class NpuProbeStatus {
@@ -65,36 +63,21 @@ data class NpuProbeResult(
   val stageResults: List<NpuProbeStageResult>,
   /** Stage where the probe stopped, or null when every stage passed (SUCCESS). */
   val failedStage: NpuProbeStage?,
-    /**
-     * Last executed stage for diagnostic runs that intentionally stop before the
-     * full initialization path, or null when the run ran through.
-     */
-    val stoppedAfterStage: NpuProbeStage? = null,
-    /** Dispatch API handshake diagnostics, when the handshake stage ran. */
-    val dispatchHandshake: NpuDispatchHandshakeResult? = null,
-    /** Dispatch initialize diagnostics, when the initialize stage ran. */
-    val dispatchInitialize: NpuDispatchInitializeResult? = null,
-    val totalDurationMs: Long,
-  )
+  val totalDurationMs: Long,
+)
 
 /**
- * Active diagnostic probe of the LiteRT-LM NPU backend.
+ * Active probe of the production LiteRT-LM NPU path.
  *
- * It drives the exact upstream runtime path used by `LlmChatModelHelper`
- * (`Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)`) through
- * engine initialization and conversation creation, recording per-stage durations and
- * raw exceptions. No inference is performed and no fallback backend is attempted.
+ * It drives the exact runtime path used by `LlmChatModelHelper` — vendor dispatch
+ * isolation, `Backend.NPU(nativeLibraryDir = …)`, engine initialization and
+ * conversation creation — recording per-stage durations and raw exceptions.
+ * No inference is performed and no fallback backend is attempted.
  */
 object NpuRuntimeProbe {
 
   /** At most this many .so names are recorded in the precheck diagnostics. */
   const val MAX_LISTED_SO_NAMES = 20
-
-  /** MediaTek dispatch library loaded by the diagnostic dlopen stage. */
-  const val DISPATCH_LIBRARY_NAME = "libLiteRtDispatch_MediaTek.so"
-
-  /** LiteRT core C API runtime required by the dispatch library (DT_NEEDED). */
-  const val CORE_LIBRARY_NAME = "libLiteRt.so"
 
   /**
    * Runs the probe for [model] on the caller thread. Blocking native calls are
@@ -110,6 +93,7 @@ object NpuRuntimeProbe {
     val nativeLibraryDirRaw: String? = context.applicationInfo.nativeLibraryDir
     val precheck =
       collectPrecheck(
+        context,
         modelName = model.name,
         modelPath = modelPath,
         nativeLibraryDir = nativeLibraryDirRaw,
@@ -133,131 +117,95 @@ object NpuRuntimeProbe {
       )
     }
 
-    // --- Stage 2: LITERT_CORE_LIBRARY_LOAD (pure dlopen diagnostic). ---
-    val corePath = File(nativeLibraryDir, CORE_LIBRARY_NAME).absolutePath
-    val coreStart = SystemClock.elapsedRealtime()
-    val coreError: Throwable? =
-      try {
-        System.load(corePath)
-        null
-      } catch (t: Throwable) {
-        t
-      }
-    stageResults.add(
-      stageResult(NpuProbeStage.LITERT_CORE_LIBRARY_LOAD, coreStart, coreError)
-    )
-    if (coreError != null) {
-      return NpuProbeResult(
-        precheck = precheck.copy(dispatchLibraryPath = corePath),
-        stageResults = stageResults,
-        failedStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
-        stoppedAfterStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
-        totalDurationMs = elapsedSince(startTotal),
-      )
-    }
-
-    // --- Stage 3: DISPATCH_LIBRARY_LOAD (pure dlopen diagnostic, no LiteRT calls). ---
-    val dispatchPath = File(nativeLibraryDir, DISPATCH_LIBRARY_NAME).absolutePath
-    val loadStart = SystemClock.elapsedRealtime()
-    val loadError: Throwable? =
-      try {
-        System.load(dispatchPath)
-        null
-      } catch (t: Throwable) {
-        t
-      }
-    stageResults.add(stageResult(NpuProbeStage.DISPATCH_LIBRARY_LOAD, loadStart, loadError))
-    if (loadError != null) {
-      return NpuProbeResult(
-        precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
-        stageResults = stageResults,
-        failedStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
-        stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
-        totalDurationMs = elapsedSince(startTotal),
-      )
-    }
-
-    // --- Stage 4: DISPATCH_API_HANDSHAKE (dlsym + LiteRtDispatchGetApi only). ---
-    // The native bridge dlopens the already-loaded dispatch library, resolves
-    // LiteRtDispatchGetApi and returns the API version plus null-ness of the
-    // interface pointers. It never calls initialize and never touches Neuron.
-    val handshakeStart = SystemClock.elapsedRealtime()
-    var handshakeError: Throwable? = null
-    var handshake: NpuDispatchHandshakeResult? = null
+    // --- Stages 2..5: the production initialization path. ---
+    val npuNativeLibraryDir = npuNativeLibraryDirForDevice(context)
+    var engine: Engine? = null
     try {
-      val json = NpuDispatchHandshakeBridge.handshake(dispatchPath)
-      handshake =
-        parseNpuDispatchHandshakeJson(json)
-          ?: throw IllegalStateException("Dispatch handshake: unparsable result: $json")
-      if (handshake.status != "OK") {
-        throw IllegalStateException(
-          "Dispatch handshake failed: ${handshake.error.ifEmpty { "status=${handshake.status}" }}"
-        )
+      val backendStart = SystemClock.elapsedRealtime()
+      val backend = Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
+      stageResults.add(stageResult(NpuProbeStage.BACKEND_CREATED, backendStart, null))
+
+      val engineStart = SystemClock.elapsedRealtime()
+      var created: Engine? = null
+      var createError: Throwable? = null
+      try {
+        created =
+          Engine(
+            EngineConfig(
+              modelPath = modelPath,
+              backend = backend,
+              visionBackend = null,
+              audioBackend = null,
+              maxNumTokens = null,
+              cacheDir = null,
+            ),
+          )
+      } catch (t: Throwable) {
+        createError = t
       }
-    } catch (t: Throwable) {
-      handshakeError = t
-    }
-    stageResults.add(
-      stageResult(NpuProbeStage.DISPATCH_API_HANDSHAKE, handshakeStart, handshakeError)
-    )
-    if (handshakeError != null) {
+      engine = created
+      stageResults.add(stageResult(NpuProbeStage.ENGINE_CREATED, engineStart, createError))
+      if (createError != null) {
+        return failedResult(precheck, stageResults, NpuProbeStage.ENGINE_CREATED, startTotal)
+      }
+      val initialized = engine!!
+
+      val initializeStart = SystemClock.elapsedRealtime()
+      var initializeError: Throwable? = null
+      try {
+        initialized.initialize()
+      } catch (t: Throwable) {
+        initializeError = t
+      }
+      stageResults.add(stageResult(NpuProbeStage.ENGINE_INITIALIZED, initializeStart, initializeError))
+      if (initializeError != null) {
+        return failedResult(precheck, stageResults, NpuProbeStage.ENGINE_INITIALIZED, startTotal)
+      }
+
+      val conversationStart = SystemClock.elapsedRealtime()
+      var conversationError: Throwable? = null
+      var conversationCreated = false
+      try {
+        val conversation =
+          initialized.createConversation(ConversationConfig(samplerConfig = null))
+        conversation.close()
+        conversationCreated = true
+      } catch (t: Throwable) {
+        conversationError = t
+      }
+      stageResults.add(stageResult(NpuProbeStage.CONVERSATION_CREATED, conversationStart, conversationError))
+      if (conversationError != null || !conversationCreated) {
+        return failedResult(precheck, stageResults, NpuProbeStage.CONVERSATION_CREATED, startTotal)
+      }
+
+      stageResults.add(stageResult(NpuProbeStage.SUCCESS, SystemClock.elapsedRealtime(), null))
       return NpuProbeResult(
-        precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
+        precheck = precheck,
         stageResults = stageResults,
-        failedStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
-        stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
-        dispatchHandshake = handshake,
+        failedStage = null,
         totalDurationMs = elapsedSince(startTotal),
       )
-    }
-
-    // --- Stage 5: DISPATCH_INITIALIZE (LiteRtDispatchInitialize only). ---
-    // Creates a fresh LiteRtEnvironment with a single DispatchLibraryDir string
-    // option pointing at the installer-managed nativeLibraryDir, an empty
-    // LiteRtOptions, and calls the dispatch's initialize entry point. It never
-    // creates Engine/model/device contexts and never loads the model.
-    // Upstream source contract (revision 0b1b17f): the MediaTek dispatch keeps
-    // references to both the environment and options beyond initialize, so the
-    // bridge deliberately does not destroy them.
-    val initializeStart = SystemClock.elapsedRealtime()
-    var initializeError: Throwable? = null
-    var initializeResult: NpuDispatchInitializeResult? = null
-    try {
-      val json =
-        NpuDispatchHandshakeBridge.initializeDispatch(
-          coreLibraryPath = corePath,
-          dispatchLibraryPath = dispatchPath,
-          nativeLibraryDir = nativeLibraryDir,
-        )
-      initializeResult =
-        parseNpuDispatchInitializeJson(json)
-          ?: throw IllegalStateException("Dispatch initialize: unparsable result: $json")
-      if (initializeResult.status != "OK") {
-        throw IllegalStateException(
-          "Dispatch initialize failed: ${initializeResult.error.ifEmpty {
-            "status=${initializeResult.initStatus} (${initializeResult.statusString})"
-          }}"
-        )
+    } finally {
+      try {
+        engine?.close()
+      } catch (t: Throwable) {
+        // Closing a partially initialized engine must not mask the probe outcome.
       }
-    } catch (t: Throwable) {
-      initializeError = t
     }
-    stageResults.add(
-      stageResult(NpuProbeStage.DISPATCH_INITIALIZE, initializeStart, initializeError)
-    )
-
-    // Diagnostic build: the probe always stops here, engine initialization
-    // (Backend.NPU / Engine / model) is a separate later increment.
-    return NpuProbeResult(
-      precheck = precheck.copy(dispatchLibraryPath = dispatchPath),
-      stageResults = stageResults,
-      failedStage = initializeError?.let { NpuProbeStage.DISPATCH_INITIALIZE },
-      stoppedAfterStage = NpuProbeStage.DISPATCH_INITIALIZE,
-      dispatchHandshake = handshake,
-      dispatchInitialize = initializeResult,
-      totalDurationMs = elapsedSince(startTotal),
-    )
   }
+
+  private fun failedResult(
+    precheck: NpuProbePrecheck?,
+    stageResults: List<NpuProbeStageResult>,
+    failedStage: NpuProbeStage,
+    startTotalMs: Long,
+  ): NpuProbeResult =
+    NpuProbeResult(
+      precheck = precheck,
+      stageResults = stageResults,
+      failedStage = failedStage,
+      totalDurationMs = elapsedSince(startTotalMs),
+    )
 
   private fun stageResult(
     stage: NpuProbeStage,
@@ -275,6 +223,7 @@ object NpuRuntimeProbe {
   private fun elapsedSince(startTotalMs: Long): Long = SystemClock.elapsedRealtime() - startTotalMs
 
   private fun collectPrecheck(
+    context: Context,
     modelName: String,
     modelPath: String,
     nativeLibraryDir: String?,
@@ -291,6 +240,28 @@ object NpuRuntimeProbe {
       } else {
         emptyList()
       }
+    var vendorLabel = ""
+    var vendorDispatchDirPath = ""
+    var vendorDispatchDirExists = false
+    var vendorDispatchSoCount = 0
+    var vendorDispatchSoNames: List<String> = emptyList()
+    if (exists) {
+      val vendor =
+        npuDispatchVendorForDevice(
+          SocVendorDetector.detect(
+            socManufacturer = android.os.Build.SOC_MANUFACTURER ?: "",
+            socModel = android.os.Build.SOC_MODEL ?: "",
+          ),
+        )
+      if (vendor != null) {
+        vendorLabel = vendor.label
+        val preparation = prepareVendorDispatchRuntime(context, vendor)
+        vendorDispatchDirPath = preparation.vendorDispatchDir.absolutePath
+        vendorDispatchDirExists = preparation.vendorDispatchDir.isDirectory
+        vendorDispatchSoCount = preparation.visibleSoNames.size
+        vendorDispatchSoNames = preparation.visibleSoNames
+      }
+    }
     return NpuProbePrecheck(
       model = modelName,
       modelPath = modelPath,
@@ -299,6 +270,11 @@ object NpuRuntimeProbe {
       directoryReadable = readable,
       visibleSoCount = soNames.size,
       visibleSoNames = soNames.take(MAX_LISTED_SO_NAMES),
+      vendorLabel = vendorLabel,
+      vendorDispatchDirPath = vendorDispatchDirPath,
+      vendorDispatchDirExists = vendorDispatchDirExists,
+      vendorDispatchVisibleSoCount = vendorDispatchSoCount,
+      vendorDispatchVisibleSoNames = vendorDispatchSoNames.take(MAX_LISTED_SO_NAMES),
     )
   }
 }

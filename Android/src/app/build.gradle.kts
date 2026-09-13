@@ -122,8 +122,11 @@ android {
   // NPU backend resolves vendor dispatch libraries relative to `nativeLibraryDir`.
   // Groovy-style dynamic invocation: the legacy (android.newDsl=false) decorated
   // extension rejects the statically typed Kotlin DSL lambdas.
-  // Diagnostic UAT: the two foreign dispatch runtimes are excluded from the APK so
-  // LiteRT cannot pick them; MediaTek dispatch remains the only dispatch runtime.
+  // The two foreign dispatch runtimes are excluded from the APK so LiteRT cannot
+  // pick them; MediaTek dispatch remains the only dispatch runtime.
+  // Both LiteRT artifacts bundle the runtime core; the deduplication below must
+  // keep the `com.google.ai.edge.litert:litert` copy (the build ships the
+  // self-contained MediaTek dispatch that matches this exact runtime build).
   withGroovyBuilder {
     "packagingOptions" {
       "jniLibs" {
@@ -132,6 +135,12 @@ android {
           setOf(
             "**/libLiteRtDispatch_GoogleTensor.so",
             "**/libLiteRtDispatch_Qualcomm.so",
+          )
+        )
+        "setPickFirsts"(
+          setOf(
+            "**/libLiteRt.so",
+            "**/libLiteRtClGlAccelerator.so",
           )
         )
       }
@@ -157,6 +166,7 @@ dependencies {
   implementation(libs.com.google.code.gson)
   implementation(libs.androidx.lifecycle.process)
   implementation(libs.litertlm)
+  implementation(libs.litert)
   implementation(libs.commonmark)
   implementation(libs.richtext)
   implementation(libs.openid.appauth)

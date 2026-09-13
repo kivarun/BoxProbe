@@ -6,19 +6,6 @@ import org.junit.Test
 
 class NpuProbeFormattingTest {
 
-  @org.junit.Test
-  fun handshakeParse_mapsInterfaceKeyToPresentFlags() {
-    val parsed =
-      parseNpuDispatchHandshakeJson(
-        "{\"status\":\"OK\",\"major\":0,\"minor\":1,\"patch\":0,\"interface\":true," +
-          "\"async\":false,\"graph\":false,\"errorCode\":0}",
-      )
-    assertEquals(true, parsed?.interfacePresent)
-    assertEquals(false, parsed?.asyncPresent)
-    assertEquals(false, parsed?.graphPresent)
-    assertEquals("0.1.0", "${parsed?.major}.${parsed?.minor}.${parsed?.patch}")
-  }
-
   private fun passedStage(stage: NpuProbeStage, durationMs: Long = 10L) =
     NpuProbeStageResult(
       stage = stage,
@@ -45,12 +32,10 @@ class NpuProbeFormattingTest {
   private fun result(
     stages: List<NpuProbeStageResult>,
     failedStage: NpuProbeStage?,
-    stoppedAfterStage: NpuProbeStage? = null,
   ) = NpuProbeResult(
     precheck = null,
     stageResults = stages,
     failedStage = failedStage,
-    stoppedAfterStage = stoppedAfterStage,
     totalDurationMs = 150L,
   )
 
@@ -59,10 +44,6 @@ class NpuProbeFormattingTest {
     assertEquals(
       listOf(
         "PRECHECK",
-        "LITERT_CORE_LIBRARY_LOAD",
-        "DISPATCH_LIBRARY_LOAD",
-        "DISPATCH_API_HANDSHAKE",
-        "DISPATCH_INITIALIZE",
         "BACKEND_CREATED",
         "ENGINE_CREATED",
         "ENGINE_INITIALIZED",
@@ -99,7 +80,7 @@ class NpuProbeFormattingTest {
   @Test
   fun runtimeValidatedLabel_passedProbe() {
     assertEquals(
-      "Initialization passed",
+      "NPU engine + conversation ready",
       npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, null),
     )
   }
@@ -108,127 +89,12 @@ class NpuProbeFormattingTest {
   fun runtimeValidatedLabel_failedProbeNamesStage() {
     val probeResult =
       result(
-        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD)),
-        failedStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
+        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.ENGINE_INITIALIZED)),
+        failedStage = NpuProbeStage.ENGINE_INITIALIZED,
       )
     assertEquals(
-      "Failed at DISPATCH_LIBRARY_LOAD",
+      "Failed at ENGINE_INITIALIZED",
       npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_FAILED, probeResult),
-    )
-  }
-
-  @Test
-  fun runtimeValidatedLabel_diagnosticStopAfterDispatchLoad_showsDispatchLoaded() {
-    val probeResult =
-      result(
-        stages = listOf(passedStage(NpuProbeStage.PRECHECK), passedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD)),
-        failedStage = null,
-        stoppedAfterStage = NpuProbeStage.DISPATCH_LIBRARY_LOAD,
-      )
-    assertEquals(
-      "Core + dispatch loaded",
-      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, probeResult),
-    )
-  }
-
-  @Test
-  fun runtimeValidatedLabel_coreLoadFailure_stopsBeforeDispatch() {
-    val probeResult =
-      result(
-        stages = listOf(passedStage(NpuProbeStage.PRECHECK), failedStage(NpuProbeStage.LITERT_CORE_LIBRARY_LOAD)),
-        failedStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
-        stoppedAfterStage = NpuProbeStage.LITERT_CORE_LIBRARY_LOAD,
-      )
-    assertEquals(
-      "Failed at LITERT_CORE_LIBRARY_LOAD",
-      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_FAILED, probeResult),
-    )
-  }
-
-  @Test
-  fun runtimeValidatedLabel_diagnosticStopAfterHandshake_showsHandshake() {
-    val probeResult =
-      result(
-        stages =
-          listOf(
-            passedStage(NpuProbeStage.PRECHECK),
-            passedStage(NpuProbeStage.DISPATCH_LIBRARY_LOAD),
-            passedStage(NpuProbeStage.DISPATCH_API_HANDSHAKE),
-          ),
-        failedStage = null,
-        stoppedAfterStage = NpuProbeStage.DISPATCH_API_HANDSHAKE,
-      )
-    assertEquals(
-      "Core + dispatch + API handshake",
-      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, probeResult),
-    )
-  }
-
-  @Test
-  fun handshakeRows_showVersionAndInterfacePresence() {
-    val rows =
-      npuProbeHandshakeRows(
-        NpuDispatchHandshakeResult(
-          status = "OK",
-          major = 0,
-          minor = 1,
-          patch = 0,
-          interfacePresent = true,
-          asyncPresent = false,
-          graphPresent = false,
-        ),
-      )
-    assertEquals(
-      listOf(
-        "Dispatch API status" to "OK",
-        "API version" to "0.1.0",
-        "Basic interface" to "present",
-        "Async interface" to "absent",
-        "Graph interface" to "absent",
-      ),
-      rows,
-    )
-  }
-
-  @Test
-  fun handshakeRows_includeRawErrorWhenPresent() {
-    val rows =
-      npuProbeHandshakeRows(
-        NpuDispatchHandshakeResult(
-          status = "ERROR",
-          error = "dlopen failed: nope",
-        ),
-      )
-    assertEquals(6, rows.size)
-    assertEquals("Handshake raw error" to "dlopen failed: nope", rows.last())
-  }
-
-  @Test
-  fun initializeRows_okShowsOk() {
-    val rows =
-      npuProbeInitializeRows(
-        NpuDispatchInitializeResult(status = "OK", initStatus = 0, statusString = "OK"),
-      )
-    assertEquals(listOf("Dispatch initialize" to "OK"), rows)
-  }
-
-  @Test
-  fun initializeRows_failureCarriesStatusAndRawError() {
-    val rows =
-      npuProbeInitializeRows(
-        NpuDispatchInitializeResult(
-          status = "ERROR",
-          initStatus = 14,
-          statusString = "RuntimeFailure",
-          error = "adapter not found",
-        ),
-      )
-    assertEquals(
-      listOf(
-        "Dispatch initialize" to "ERROR — 14 — RuntimeFailure",
-        "Initialize raw error" to "adapter not found",
-      ),
-      rows,
     )
   }
 
@@ -268,14 +134,30 @@ class NpuProbeFormattingTest {
   fun stageLabel_failedStageIncludesExceptionClassAndMessage() {
     assertEquals(
       "failed in 30 ms — java.lang.IllegalStateException: boom",
-      npuProbeStageLabel(failedStage(NpuProbeStage.ENGINE_CREATED, 30L)),
+      npuProbeStageLabel(failedStage(NpuProbeStage.PRECHECK, 30L)),
     )
   }
 
   @Test
-  fun durationFormat_msBelowSecond_secondsAbove() {
-    assertEquals("999 ms", npuProbeFormatDuration(999L))
-    assertEquals("1.00 s", npuProbeFormatDuration(1000L))
-    assertEquals("12.50 s", npuProbeFormatDuration(12500L))
+  fun stageLabel_failedStageWithoutExceptionStillShowsClass() {
+    val stage =
+      NpuProbeStageResult(
+        stage = NpuProbeStage.PRECHECK,
+        durationMs = 30L,
+        passed = false,
+        exceptionClass = "java.lang.IllegalStateException",
+        exceptionMessage = null,
+      )
+    assertEquals(
+      "failed in 30 ms — java.lang.IllegalStateException",
+      npuProbeStageLabel(stage),
+    )
+  }
+
+  @Test
+  fun durationFormatting_secondsAndMillis() {
+    assertEquals("120 ms", npuProbeFormatDuration(120L))
+    assertEquals("2.00 s", npuProbeFormatDuration(2000L))
+    assertEquals("2.34 s", npuProbeFormatDuration(2340L))
   }
 }

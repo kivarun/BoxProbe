@@ -28,6 +28,7 @@ import com.google.ai.edge.gallery.data.DEFAULT_TOPK
 import com.google.ai.edge.gallery.data.DEFAULT_TOPP
 import com.google.ai.edge.gallery.data.DEFAULT_VISION_ACCELERATOR
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.systeminfo.npuNativeLibraryDirForDevice
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -79,12 +80,13 @@ object LlmChatModelHelper : LlmModelHelper {
         key = ConfigKeys.VISION_ACCELERATOR,
         defaultValue = DEFAULT_VISION_ACCELERATOR.label,
       )
+    val npuNativeLibraryDir = npuNativeLibraryDirForDevice(context)
     val visionBackend =
       when (visionAccelerator) {
         Accelerator.CPU.label -> Backend.CPU()
         Accelerator.GPU.label -> Backend.GPU()
         Accelerator.NPU.label, Accelerator.TPU.label ->
-          Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+          Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
         else -> Backend.GPU()
       }
     val shouldEnableImage = supportImage
@@ -94,7 +96,7 @@ object LlmChatModelHelper : LlmModelHelper {
         Accelerator.CPU.label -> Backend.CPU()
         Accelerator.GPU.label -> Backend.GPU()
         Accelerator.NPU.label, Accelerator.TPU.label ->
-          Backend.NPU(nativeLibraryDir = context.applicationInfo.nativeLibraryDir)
+          Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
         else -> Backend.CPU()
       }
     Log.d(TAG, "Preferred backend: $preferredBackend")
