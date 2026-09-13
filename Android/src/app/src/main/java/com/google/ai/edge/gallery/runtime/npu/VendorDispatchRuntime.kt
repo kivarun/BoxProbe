@@ -1,52 +1,60 @@
-package com.google.ai.edge.gallery.systeminfo
+package com.google.ai.edge.gallery.runtime.npu
 
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.google.ai.edge.gallery.systeminfo.SocVendor
+import com.google.ai.edge.gallery.systeminfo.SocVendorDetector
 import java.io.File
 import java.nio.file.Files
 
 private const val TAG = "VendorDispatchRuntime"
 
 /**
- * Vendor-isolated LiteRT dispatch runtime.
+ * Production vendor-isolated LiteRT dispatch runtime.
  *
  * LiteRT resolves vendor dispatch libraries relative to `nativeLibraryDir`. When the
  * plain app `nativeLibraryDir` contains dispatch runtimes of several vendors, LiteRT
- * may pick an unrelated one. To make the NPU path deterministic, the probe points
+ * may pick an unrelated one. To make the NPU path deterministic, production points
  * `Backend.NPU(nativeLibraryDir = …)` at an app-private directory that exposes
  * symlinks to only the required vendor libraries extracted into
  * `applicationInfo.nativeLibraryDir`.
+ *
+ * The SoC classification itself ([SocVendorDetector]) lives in the systeminfo layer
+ * and stays shared with the System Info screen; this layer owns only the production
+ * dispatch runtime built on top of it.
  */
 
-/** Vendors with distinct LiteRT dispatch runtimes. */
+/**
+ * Vendors with a production LiteRT dispatch runtime. A vendor exists here only once
+ * its dispatch runtime is actually implemented and shipped by the build; devices of
+ * other vendors map to null instead of a fake vendor entry.
+ */
 enum class NpuDispatchVendor(val dirName: String, val label: String) {
   MEDIATEK("mediatek", "MediaTek"),
-  QUALCOMM("qualcomm", "Qualcomm"),
-  GOOGLE_TENSOR("google_tensor", "Google Tensor"),
 }
 
 /**
  * Non-system libraries required by LiteRT to initialize the vendor NPU dispatch path.
  *
  * Determined from the actual DT_NEEDED requirements of the bundled vendor libraries.
- * Implementation is deliberately minimal: only MediaTek is wired for now.
  */
 fun npuRequiredLibNames(vendor: NpuDispatchVendor): List<String> =
   when (vendor) {
     NpuDispatchVendor.MEDIATEK ->
       listOf("libLiteRtDispatch_MediaTek.so", "libLiteRtCompilerPlugin_MediaTek.so")
-    NpuDispatchVendor.QUALCOMM -> emptyList()
-    NpuDispatchVendor.GOOGLE_TENSOR -> emptyList()
   }
 
-/** Maps the existing device vendor classification to an NPU dispatch vendor, or null. */
+/**
+ * Maps the device's SoC vendor onto the production NPU dispatch vendor, or null when
+ * the device has no production-supported NPU dispatch runtime. Non-MediaTek vendors
+ * remain known to the System Info layer but do not exist in the production runtime
+ * until their dispatch runtime is implemented.
+ */
 fun npuDispatchVendorForDevice(socVendor: SocVendor): NpuDispatchVendor? =
   when (socVendor) {
     SocVendor.MEDIATEK -> NpuDispatchVendor.MEDIATEK
-    SocVendor.QUALCOMM -> NpuDispatchVendor.QUALCOMM
-    SocVendor.GOOGLE_TENSOR -> NpuDispatchVendor.GOOGLE_TENSOR
-    SocVendor.UNKNOWN -> null
+    else -> null
   }
 
 /** Required vendor libraries that are not visible in `nativeLibraryDir`. */
@@ -150,7 +158,8 @@ data class VendorDispatchPreparation(
 fun prepareVendorDispatchRuntime(
   context: Context,
   vendor: NpuDispatchVendor,
-): VendorDispatchPreparation {  val vendorDispatchDir = File(context.filesDir, "runtime-dispatch/${vendor.dirName}")
+): VendorDispatchPreparation {
+  val vendorDispatchDir = File(context.filesDir, "runtime-dispatch/${vendor.dirName}")
 
   val nativeLibraryDir: String = context.applicationInfo.nativeLibraryDir ?: ""
   if (nativeLibraryDir.isEmpty()) {
@@ -166,17 +175,6 @@ fun prepareVendorDispatchRuntime(
   }
 
   val required = npuRequiredLibNames(vendor)
-  if (required.isEmpty()) {
-    return VendorDispatchPreparation(
-      vendor = vendor,
-      vendorDispatchDir = vendorDispatchDir,
-      dirExists = false,
-      visibleSoNames = emptyList(),
-      missingRequired = emptyList(),
-      symlinkMode = false,
-      errors = listOf("${vendor.label} NPU dispatch isolation is not implemented yet"),
-    )
-  }
 
   val nativeLibraryDirFile = File(nativeLibraryDir)
   val availableSoNames =
@@ -236,11 +234,15 @@ fun prepareVendorDispatchRuntime(
       }
       VendorDispatchSyncKind.CREATE, VendorDispatchSyncKind.REPAIR -> {
         val source = File(nativeLibraryDir, action.entryName)
-        if (entry.exists() && !entry.isDirectory) {
-          if (!entry.delete()) {
-            errors.add("Failed to replace entry: ${action.entryName}")
-            continue
-          }
+        // A dangling symlink reports exists() == false but still occupies the entry:
+        // delete() removes the link itself and is a harmless no-op when absent.
+        if (entry.isDirectory) {
+          errors.add("Refusing to replace non-file entry: ${action.entryName}")
+          continue
+        }
+        if (!entry.delete() && entry.exists()) {
+          errors.add("Failed to replace entry: ${action.entryName}")
+          continue
         }
         try {
           Files.createSymbolicLink(entry.toPath(), source.toPath())
@@ -267,7 +269,7 @@ fun prepareVendorDispatchRuntime(
     vendor = vendor,
     vendorDispatchDir = vendorDispatchDir,
     dirExists = vendorDispatchDir.isDirectory,
-    visibleSoNames = visibleSoNames.take(NpuRuntimeProbe.MAX_LISTED_SO_NAMES),
+    visibleSoNames = visibleSoNames,
     missingRequired = emptyList(),
     symlinkMode = symlinkMode,
     errors = errors,
@@ -275,35 +277,49 @@ fun prepareVendorDispatchRuntime(
 }
 
 /**
+ * Directory passed to `Backend.NPU(nativeLibraryDir = …)` for a prepared vendor
+ * runtime: the vendor-isolated dispatch directory when the preparation succeeded, the
+ * installer `nativeLibraryDir` otherwise. LiteRT discovers vendor dispatch runtimes
+ * inside that directory, so a failed vendor isolation must never block the NPU path.
+ */
+fun resolveNpuNativeLibraryDir(
+  nativeLibraryDir: String?,
+  preparation: VendorDispatchPreparation?,
+): String =
+  if (preparation != null && preparation.ok) preparation.vendorDispatchDir.absolutePath
+  else nativeLibraryDir ?: ""
+
+/**
+ * Detects the device's production NPU dispatch vendor and prepares its runtime, or
+ * null when the device has no production-supported NPU dispatch vendor.
+ */
+fun prepareVendorDispatchRuntimeForDevice(context: Context): VendorDispatchPreparation? =
+  npuDispatchVendorForDevice(
+    SocVendorDetector.detect(
+      socManufacturer = Build.SOC_MANUFACTURER ?: "",
+      socModel = Build.SOC_MODEL ?: "",
+    ),
+  )?.let { prepareVendorDispatchRuntime(context, it) }
+
+/**
  * Native library directory for the production NPU backend.
  *
  * Returns the vendor-isolated dispatch directory for this device's SoC when it can
- * be prepared, falling back to the installer `nativeLibraryDir` otherwise. LiteRT
- * discovers vendor dispatch runtimes inside the directory passed via
- * `Backend.NPU(nativeLibraryDir = …)`, so a failed vendor isolation must never
- * block the NPU path.
+ * be prepared, falling back to the installer `nativeLibraryDir` otherwise.
  */
 fun npuNativeLibraryDirForDevice(context: Context): String {
   val nativeLibraryDir = context.applicationInfo.nativeLibraryDir
-  val vendor =
-    npuDispatchVendorForDevice(
-      SocVendorDetector.detect(
-        socManufacturer = Build.SOC_MANUFACTURER ?: "",
-        socModel = Build.SOC_MODEL ?: "",
-      ),
-    )
-  if (vendor == null) {
-    Log.w(TAG, "SoC vendor not recognized for NPU dispatch isolation, using nativeLibraryDir")
-    return nativeLibraryDir
+  val preparation = prepareVendorDispatchRuntimeForDevice(context)
+  val resolved = resolveNpuNativeLibraryDir(nativeLibraryDir, preparation)
+  when {
+    preparation == null ->
+      Log.w(TAG, "SoC vendor not recognized for NPU dispatch isolation, using nativeLibraryDir")
+    resolved != preparation.vendorDispatchDir.absolutePath ->
+      Log.w(
+        TAG,
+        "Failed to prepare ${preparation.vendor} dispatch runtime, using nativeLibraryDir: " +
+          (preparation.errors + preparation.missingRequired).joinToString("; "),
+      )
   }
-  val preparation = prepareVendorDispatchRuntime(context, vendor)
-  if (!preparation.ok) {
-    Log.w(
-      TAG,
-      "Failed to prepare $vendor dispatch runtime, using nativeLibraryDir: " +
-        (preparation.errors + preparation.missingRequired).joinToString("; "),
-    )
-    return nativeLibraryDir
-  }
-  return preparation.vendorDispatchDir.absolutePath
+  return resolved
 }

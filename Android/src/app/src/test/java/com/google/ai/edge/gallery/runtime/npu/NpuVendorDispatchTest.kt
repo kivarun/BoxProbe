@@ -1,5 +1,7 @@
-package com.google.ai.edge.gallery.systeminfo
+package com.google.ai.edge.gallery.runtime.npu
 
+import com.google.ai.edge.gallery.systeminfo.SocVendor
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,10 +14,24 @@ class NpuVendorDispatchTest {
 
   private fun expectedTarget(name: String) = "$nativeLibraryDir/$name"
 
+  private val vendorDispatchDir =
+    "/data/data/com.kivarun.boxprobe/files/runtime-dispatch/mediatek"
+
   private val mediatekRequired = listOf(
     "libLiteRtDispatch_MediaTek.so",
     "libLiteRtCompilerPlugin_MediaTek.so",
   )
+
+  private fun preparation(errors: List<String>): VendorDispatchPreparation =
+    VendorDispatchPreparation(
+      vendor = NpuDispatchVendor.MEDIATEK,
+      vendorDispatchDir = File(vendorDispatchDir),
+      dirExists = errors.isEmpty(),
+      visibleSoNames = mediatekRequired,
+      missingRequired = emptyList(),
+      symlinkMode = true,
+      errors = errors,
+    )
 
   @Test
   fun mediatekVendor_selectionAndRequiredNames() {
@@ -25,9 +41,9 @@ class NpuVendorDispatchTest {
   }
 
   @Test
-  fun nonMediaTekVendors_notImplementedYet() {
-    assertTrue(npuRequiredLibNames(NpuDispatchVendor.QUALCOMM).isEmpty())
-    assertTrue(npuRequiredLibNames(NpuDispatchVendor.GOOGLE_TENSOR).isEmpty())
+  fun nonMediaTekVendors_unsupportedInProduction() {
+    assertNull(npuDispatchVendorForDevice(SocVendor.QUALCOMM))
+    assertNull(npuDispatchVendorForDevice(SocVendor.GOOGLE_TENSOR))
     assertNull(npuDispatchVendorForDevice(SocVendor.UNKNOWN))
   }
 
@@ -128,5 +144,25 @@ class NpuVendorDispatchTest {
     assertTrue(second.all { it.kind == VendorDispatchSyncKind.KEEP })
     assertTrue(second.none { it.kind == VendorDispatchSyncKind.REMOVE })
     assertFalse(first == second)
+  }
+
+  @Test
+  fun resolveNpuNativeLibraryDir_preparedRuntimeReusedWithoutSecondPrepare() {
+    // A healthy preparation is used as-is for Backend.NPU(nativeLibraryDir = …).
+    assertEquals(
+      vendorDispatchDir,
+      resolveNpuNativeLibraryDir(nativeLibraryDir, preparation(errors = emptyList())),
+    )
+    // A failed preparation falls back to the installer nativeLibraryDir.
+    assertEquals(
+      nativeLibraryDir,
+      resolveNpuNativeLibraryDir(
+        nativeLibraryDir,
+        preparation(errors = listOf("Failed to remove stale entry: x.so")),
+      ),
+    )
+    // No supported vendor on this device: the installer nativeLibraryDir is used.
+    assertEquals(nativeLibraryDir, resolveNpuNativeLibraryDir(nativeLibraryDir, null))
+    assertEquals("", resolveNpuNativeLibraryDir(null, null))
   }
 }

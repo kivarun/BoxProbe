@@ -3,6 +3,9 @@ package com.google.ai.edge.gallery.systeminfo
 import android.content.Context
 import android.os.SystemClock
 import com.google.ai.edge.gallery.data.Model
+import com.google.ai.edge.gallery.runtime.npu.VendorDispatchPreparation
+import com.google.ai.edge.gallery.runtime.npu.prepareVendorDispatchRuntimeForDevice
+import com.google.ai.edge.gallery.runtime.npu.resolveNpuNativeLibraryDir
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
@@ -91,12 +94,19 @@ object NpuRuntimeProbe {
     val precheckStart = SystemClock.elapsedRealtime()
     val modelPath = model.getPath(context = context)
     val nativeLibraryDirRaw: String? = context.applicationInfo.nativeLibraryDir
+    // The vendor dispatch runtime is prepared exactly once per probe run: the same
+    // preparation feeds the precheck diagnostics and the Backend.NPU creation below.
+    // The vendor directory is only touched when the installer nativeLibraryDir exists.
+    val vendorPreparation: VendorDispatchPreparation? =
+      nativeLibraryDirRaw
+        ?.takeIf { it.isNotEmpty() && File(it).isDirectory }
+        ?.let { prepareVendorDispatchRuntimeForDevice(context) }
     val precheck =
       collectPrecheck(
-        context,
         modelName = model.name,
         modelPath = modelPath,
         nativeLibraryDir = nativeLibraryDirRaw,
+        vendorPreparation = vendorPreparation,
       )
     val nativeLibraryDir: String = nativeLibraryDirRaw ?: ""
     val precheckError: Throwable? =
@@ -118,11 +128,13 @@ object NpuRuntimeProbe {
     }
 
     // --- Stages 2..5: the production initialization path. ---
-    val npuNativeLibraryDir = npuNativeLibraryDirForDevice(context)
     var engine: Engine? = null
     try {
       val backendStart = SystemClock.elapsedRealtime()
-      val backend = Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
+      val backend =
+        Backend.NPU(
+          nativeLibraryDir = resolveNpuNativeLibraryDir(nativeLibraryDirRaw, vendorPreparation),
+        )
       stageResults.add(stageResult(NpuProbeStage.BACKEND_CREATED, backendStart, null))
 
       val engineStart = SystemClock.elapsedRealtime()
@@ -223,10 +235,10 @@ object NpuRuntimeProbe {
   private fun elapsedSince(startTotalMs: Long): Long = SystemClock.elapsedRealtime() - startTotalMs
 
   private fun collectPrecheck(
-    context: Context,
     modelName: String,
     modelPath: String,
     nativeLibraryDir: String?,
+    vendorPreparation: VendorDispatchPreparation?,
   ): NpuProbePrecheck {
     val dir: File? = nativeLibraryDir?.takeIf { it.isNotEmpty() }?.let { File(it) }
     val exists = dir?.isDirectory == true
@@ -245,22 +257,12 @@ object NpuRuntimeProbe {
     var vendorDispatchDirExists = false
     var vendorDispatchSoCount = 0
     var vendorDispatchSoNames: List<String> = emptyList()
-    if (exists) {
-      val vendor =
-        npuDispatchVendorForDevice(
-          SocVendorDetector.detect(
-            socManufacturer = android.os.Build.SOC_MANUFACTURER ?: "",
-            socModel = android.os.Build.SOC_MODEL ?: "",
-          ),
-        )
-      if (vendor != null) {
-        vendorLabel = vendor.label
-        val preparation = prepareVendorDispatchRuntime(context, vendor)
-        vendorDispatchDirPath = preparation.vendorDispatchDir.absolutePath
-        vendorDispatchDirExists = preparation.vendorDispatchDir.isDirectory
-        vendorDispatchSoCount = preparation.visibleSoNames.size
-        vendorDispatchSoNames = preparation.visibleSoNames
-      }
+    if (vendorPreparation != null) {
+      vendorLabel = vendorPreparation.vendor.label
+      vendorDispatchDirPath = vendorPreparation.vendorDispatchDir.absolutePath
+      vendorDispatchDirExists = vendorPreparation.vendorDispatchDir.isDirectory
+      vendorDispatchSoCount = vendorPreparation.visibleSoNames.size
+      vendorDispatchSoNames = vendorPreparation.visibleSoNames
     }
     return NpuProbePrecheck(
       model = modelName,

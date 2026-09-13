@@ -61,8 +61,9 @@ import java.util.Date
  * Technical, compact view of the device and the bundled AI runtime.
  *
  * The bundled-library inventory explicitly distinguishes "bundled in APK" from
- * "matches this device" from "validated at runtime". In this increment the runtime
- * validation column is always "Not probed".
+ * "matches this device" from "validated at runtime". For the device-matched vendor,
+ * runtime validation comes from the active NPU initialization probe; other vendors
+ * are never probed.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

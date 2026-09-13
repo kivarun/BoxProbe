@@ -28,7 +28,7 @@ import com.google.ai.edge.gallery.data.DEFAULT_TOPK
 import com.google.ai.edge.gallery.data.DEFAULT_TOPP
 import com.google.ai.edge.gallery.data.DEFAULT_VISION_ACCELERATOR
 import com.google.ai.edge.gallery.data.Model
-import com.google.ai.edge.gallery.systeminfo.npuNativeLibraryDirForDevice
+import com.google.ai.edge.gallery.runtime.npu.npuNativeLibraryDirForDevice
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
@@ -80,17 +80,24 @@ object LlmChatModelHelper : LlmModelHelper {
         key = ConfigKeys.VISION_ACCELERATOR,
         defaultValue = DEFAULT_VISION_ACCELERATOR.label,
       )
-    val npuNativeLibraryDir = npuNativeLibraryDirForDevice(context)
-    val visionBackend =
-      when (visionAccelerator) {
-        Accelerator.CPU.label -> Backend.CPU()
-        Accelerator.GPU.label -> Backend.GPU()
-        Accelerator.NPU.label, Accelerator.TPU.label ->
-          Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
-        else -> Backend.GPU()
-      }
     val shouldEnableImage = supportImage
     val shouldEnableAudio = supportAudio
+    // Vendor dispatch preparation detects the SoC and syncs an app-private vendor
+    // directory, so it is deferred until an NPU/TPU backend is actually selected:
+    // CPU/GPU initialization must not trigger any NPU runtime side effects.
+    val npuNativeLibraryDir: String by lazy { npuNativeLibraryDirForDevice(context) }
+    val visionBackend: Backend? =
+      if (shouldEnableImage) {
+        when (visionAccelerator) {
+          Accelerator.CPU.label -> Backend.CPU()
+          Accelerator.GPU.label -> Backend.GPU()
+          Accelerator.NPU.label, Accelerator.TPU.label ->
+            Backend.NPU(nativeLibraryDir = npuNativeLibraryDir)
+          else -> Backend.GPU()
+        }
+      } else {
+        null
+      }
     val preferredBackend =
       when (accelerator) {
         Accelerator.CPU.label -> Backend.CPU()
@@ -106,7 +113,7 @@ object LlmChatModelHelper : LlmModelHelper {
       EngineConfig(
         modelPath = modelPath,
         backend = preferredBackend,
-        visionBackend = if (shouldEnableImage) visionBackend else null, // must be GPU for Gemma 3n
+        visionBackend = visionBackend,
         audioBackend = if (shouldEnableAudio) Backend.CPU() else null, // must be CPU for Gemma 3n
         maxNumTokens = maxTokens,
         cacheDir =

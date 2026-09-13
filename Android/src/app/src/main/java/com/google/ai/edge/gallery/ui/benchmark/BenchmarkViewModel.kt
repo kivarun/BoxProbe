@@ -27,7 +27,7 @@ import com.google.ai.edge.gallery.proto.LlmBenchmarkBasicInfo
 import com.google.ai.edge.gallery.proto.LlmBenchmarkResult
 import com.google.ai.edge.gallery.proto.LlmBenchmarkStats
 import com.google.ai.edge.gallery.proto.ValueSeries
-import com.google.ai.edge.gallery.systeminfo.npuNativeLibraryDirForDevice
+import com.google.ai.edge.gallery.runtime.npu.npuNativeLibraryDirForDevice
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.benchmark
