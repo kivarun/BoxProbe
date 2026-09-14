@@ -84,6 +84,7 @@ fun npuRequiredLibNames(vendor: NpuDispatchVendor, socModel: String = ""): List<
             "libQnnIr.so",
             "libQnnSaver.so",
             "libQnnHtp${generation.dirSuffix}Stub.so",
+            "libQnnHtp${generation.dirSuffix}CalculatorStub.so",
             "libQnnHtp${generation.dirSuffix}Skel.so",
           )
       }

@@ -34,6 +34,7 @@ class NpuVendorDispatchTest {
     "libQnnIr.so",
     "libQnnSaver.so",
     "libQnnHtpV81Stub.so",
+    "libQnnHtpV81CalculatorStub.so",
     "libQnnHtpV81Skel.so",
   )
 
@@ -84,7 +85,9 @@ class NpuVendorDispatchTest {
     val required = npuRequiredLibNames(NpuDispatchVendor.QUALCOMM, "SM8850")
     assertEquals(qualcommSm8850Required, required)
     assertTrue(required.contains("libQnnHtpV81Stub.so"))
+    assertTrue(required.contains("libQnnHtpV81CalculatorStub.so"))
     assertTrue(required.contains("libQnnHtpV81Skel.so"))
+    assertEquals(10, required.size)
   }
 
   @Test
@@ -96,6 +99,7 @@ class NpuVendorDispatchTest {
         required.contains("libQnnHtp${generation}Stub.so"),
       )
       assertFalse(required.contains("libQnnHtp${generation}Skel.so"))
+      assertFalse(required.contains("libQnnHtp${generation}CalculatorStub.so"))
     }
   }
 

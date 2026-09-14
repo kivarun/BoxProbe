@@ -66,6 +66,7 @@ manifest inside the zip names that device group), and QAIRT 2.44's
 | libQnnIr.so | QAIRT 2.44.0.260225 | 1,741,288 | `982d7e403eec3de800219bf8de7039e7fa020749618e0505f831fcecfd2bd85d` |
 | libQnnSaver.so | QAIRT 2.44.0.260225 | 788,048 | `5dbe2eb7f17c217d035ce288b75b6cc9445df551739dba787ccb55097af48b0e` |
 | libQnnHtpV81Stub.so | QAIRT 2.44.0.260225 | 755,464 | `f85cc467bda23b8253f085c4fa2680a1428e5b94c6c5a3e572abaa20c5b13ba1` |
+| libQnnHtpV81CalculatorStub.so | QAIRT 2.44.0.260225 | 250,712 | `d8e1b289614e6285dafb460949e7a318c74ba656875dd8f1d4a1b80b31078aad` |
 | libQnnHtpV81Skel.so | QAIRT 2.44.0.260225 (hexagon-v81/unsigned) | 11,797,220 | `66719325303f22562679edfed509d540cbff53ac59127b6e4ead84b62f1dc655` |
 
 The v69/v73/v75/v79 Skel/Stub files are the same QAIRT 2.44.0.260225 release (kept so the
@@ -74,5 +75,7 @@ contains the v81 set). Both LiteRT Qualcomm binaries are statically self-contain
 (no `DT_NEEDED`/`UND` LiteRT symbols), so they cannot fail to load against the bundled
 core; the QNN runtime is `dlopen`-ed by name at runtime. JIT compile additionally
 requires `libQnnIr.so` + `libQnnSaver.so` (referenced by both the dispatch and the
-compiler plugin); `libQnnHtpV81CalculatorStub.so` is referenced by nothing in this
-chain and is therefore not shipped.
+compiler plugin); `libQnnHtpV81CalculatorStub.so` carries the same `AISW_VERSION:
+2.44.0` stamp and ELF release family as the rest of the QNN set and is part of the
+verified working SM8850 JIT runtime closure (present in the reference working set),
+so it ships with the production required set.
