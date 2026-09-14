@@ -105,6 +105,22 @@ android {
       signingConfig = signingConfigs.getByName("debug")
     }
   }
+  // Debug signing: use the persistent project keystore when it exists so that builds
+  // across environment restarts keep the same signature. The keystore itself is NOT
+  // committed; BOXPROBE_DEBUG_KEYSTORE may override the location.
+  val persistentDebugKeystore =
+    File(
+      System.getenv("BOXPROBE_DEBUG_KEYSTORE")
+        ?: "/exchange/outbox/keys/debug.keystore",
+    )
+  if (persistentDebugKeystore.isFile) {
+    signingConfigs.getByName("debug") {
+      storeFile = persistentDebugKeystore
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
+  }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
