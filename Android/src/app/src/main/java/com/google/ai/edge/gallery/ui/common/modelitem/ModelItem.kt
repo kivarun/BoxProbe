@@ -74,11 +74,13 @@ fun ModelItem(
   task: Task?,
   modelManagerViewModel: ModelManagerViewModel,
   onBenchmarkClicked: (Model) -> Unit,
+  onTestChatClicked: (Model) -> Unit = {},
   modifier: Modifier = Modifier,
   expanded: Boolean? = null,
   showDeleteButton: Boolean = true,
   canExpand: Boolean = true,
   showBenchmarkButton: Boolean = false,
+  showTestChatButton: Boolean = false,
   onExpanded: (Boolean) -> Unit = {},
 ) {
   val modelManagerUiState by modelManagerViewModel.uiState.collectAsState()
@@ -185,7 +187,9 @@ fun ModelItem(
             modelManagerViewModel = modelManagerViewModel,
             isExpanded = targetState,
             onBenchmarkClicked = { onBenchmarkClicked(model) },
+            onTestChatClicked = { onTestChatClicked(model) },
             showBenchmarkButton = showBenchmarkButton,
+            showTestChatButton = showTestChatButton,
           )
         }
       }

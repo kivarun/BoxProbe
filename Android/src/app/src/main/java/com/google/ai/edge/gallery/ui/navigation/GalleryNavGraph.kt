@@ -75,6 +75,7 @@ import com.google.ai.edge.gallery.ui.home.PromoScreenGm4
 import com.google.ai.edge.gallery.ui.systeminfo.SystemInfoScreen
 import com.google.ai.edge.gallery.ui.modelmanager.GlobalModelManager
 import com.google.ai.edge.gallery.ui.modelmanager.ModelManagerViewModel
+import com.google.ai.edge.gallery.ui.testchat.TestChatScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,6 +83,7 @@ import kotlinx.coroutines.launch
 private const val TAG = "AGGalleryNavGraph"
 private const val ROUTE_HOMESCREEN = "homepage"
 private const val ROUTE_BENCHMARK = "benchmark"
+private const val ROUTE_TEST_CHAT = "test_chat"
 private const val ROUTE_MODEL_MANAGER = "model_manager"
 private const val ROUTE_SYSTEM_INFO = "system_info"
 private const val ENTER_ANIMATION_DURATION_MS = 500
@@ -210,7 +212,8 @@ fun GalleryNavHost(
       ),
       enterTransition = {
         if (
-          initialState.destination.route?.startsWith(ROUTE_BENCHMARK) == true
+          initialState.destination.route?.startsWith(ROUTE_BENCHMARK) == true ||
+            initialState.destination.route?.startsWith(ROUTE_TEST_CHAT) == true
         ) {
           null
         } else {
@@ -219,7 +222,8 @@ fun GalleryNavHost(
       },
       exitTransition = {
         if (
-          targetState.destination.route?.startsWith(ROUTE_BENCHMARK) == true
+          targetState.destination.route?.startsWith(ROUTE_BENCHMARK) == true ||
+            targetState.destination.route?.startsWith(ROUTE_TEST_CHAT) == true
         ) {
           null
         } else {
@@ -236,6 +240,9 @@ fun GalleryNavHost(
         },
         onBenchmarkClicked = { model ->
           navController.navigate("$ROUTE_BENCHMARK/${model.name}")
+        },
+        onTestChatClicked = { model ->
+          navController.navigate("$ROUTE_TEST_CHAT/${model.name}")
         },
         startImport = startImport,
       )
@@ -254,6 +261,26 @@ fun GalleryNavHost(
       modelManagerViewModel.getModelByName(name = modelName)?.let { model ->
         BenchmarkScreen(
           initialModel = model,
+          modelManagerViewModel = modelManagerViewModel,
+          onBackClicked = {
+            navController.navigateUp()
+          },
+        )
+      }
+    }
+
+    // Minimal text-only LLM test chat.
+    composable(
+      route = "$ROUTE_TEST_CHAT/{modelName}",
+      arguments = listOf(navArgument("modelName") { type = NavType.StringType }),
+      enterTransition = { slideEnter() },
+      exitTransition = { slideExit() },
+    ) { backStackEntry ->
+      val modelName = backStackEntry.arguments?.getString("modelName") ?: ""
+
+      modelManagerViewModel.getModelByName(name = modelName)?.let { model ->
+        TestChatScreen(
+          model = model,
           modelManagerViewModel = modelManagerViewModel,
           onBackClicked = {
             navController.navigateUp()

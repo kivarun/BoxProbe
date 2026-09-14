@@ -38,6 +38,7 @@
   <string name="baseline" translatable="false">Baseline</string>
   <string name="basic_info" translatable="false">Basic info</string>
   <string name="benchmark" translatable="false">Benchmark</string>
+  <string name="test_chat" translatable="false">Test chat</string>
   <string name="benchmark_comparison_help_title" translatable="false">How to compare benchmark runs</string>
   <string name="benchmark_comparison_help_content" translatable="false">Compare benchmark runs by tapping the **Baseline** chip on any run result card to set the run as the comparison baseline. We\'ll automatically calculate and display the percentage differences in **all other** run result cards.</string>
   <string name="benchmark_model" translatable="false">Benchmark model</string>

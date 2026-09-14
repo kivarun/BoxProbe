@@ -105,6 +105,7 @@ fun GlobalModelManager(
   viewModel: ModelManagerViewModel,
   navigateUp: () -> Unit,
   onBenchmarkClicked: (Model) -> Unit,
+  onTestChatClicked: (Model) -> Unit,
   modifier: Modifier = Modifier,
   startImport: Boolean = false,
 ) {
@@ -263,8 +264,10 @@ fun GlobalModelManager(
             task = null,
             modelManagerViewModel = viewModel,
             onBenchmarkClicked = onBenchmarkClicked,
+            onTestChatClicked = onTestChatClicked,
             expanded = expanded,
             showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
+            showTestChatButton = model.isLlm && model.runtimeType == RuntimeType.LITERT_LM,
             onExpanded = { modelItemExpandedStates[model.name] = it },
           )
         }
@@ -286,8 +289,10 @@ fun GlobalModelManager(
             task = null,
             modelManagerViewModel = viewModel,
             onBenchmarkClicked = onBenchmarkClicked,
+            onTestChatClicked = onTestChatClicked,
             expanded = true,
             showBenchmarkButton = model.runtimeType == RuntimeType.LITERT_LM,
+            showTestChatButton = model.isLlm && model.runtimeType == RuntimeType.LITERT_LM,
           )
         }
       }

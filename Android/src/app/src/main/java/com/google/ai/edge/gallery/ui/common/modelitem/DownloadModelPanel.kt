@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.ChatBubble
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -60,8 +61,10 @@ fun DownloadModelPanel(
   sharedTransitionScope: SharedTransitionScope,
   animatedVisibilityScope: AnimatedVisibilityScope,
   onBenchmarkClicked: () -> Unit,
+  onTestChatClicked: () -> Unit = {},
   modifier: Modifier = Modifier,
   showBenchmarkButton: Boolean = false,
+  showTestChatButton: Boolean = false,
 ) {
   val downloadSucceeded = downloadStatus?.status == ModelDownloadStatusType.SUCCEEDED
   with(sharedTransitionScope) {
@@ -70,6 +73,49 @@ fun DownloadModelPanel(
       horizontalArrangement = Arrangement.End,
       verticalAlignment = Alignment.CenterVertically,
     ) {
+      if (showTestChatButton && downloadSucceeded) {
+        // Test chat button.
+        var buttonModifier: Modifier = Modifier.height(42.dp)
+        if (isExpanded) {
+          buttonModifier = buttonModifier.weight(1f)
+        }
+        Button(
+          modifier =
+            Modifier.sharedElement(
+                sharedContentState = rememberSharedContentState(key = "test_chat_button"),
+                animatedVisibilityScope = animatedVisibilityScope,
+              )
+              .then(buttonModifier),
+          colors =
+            ButtonDefaults.buttonColors(
+              containerColor = MaterialTheme.colorScheme.secondaryContainer
+            ),
+          contentPadding = PaddingValues(horizontal = 12.dp),
+          onClick = onTestChatClicked,
+        ) {
+          val textColor = MaterialTheme.colorScheme.onSecondaryContainer
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+          ) {
+            Icon(Icons.Rounded.ChatBubble, contentDescription = null, tint = textColor)
+
+            if (isExpanded) {
+              Text(
+                stringResource(R.string.test_chat),
+                color = textColor,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                autoSize =
+                  TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 16.sp, stepSize = 1.sp),
+              )
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+      }
+
       if (showBenchmarkButton && downloadSucceeded) {
         // Benchmark button.
         var buttonModifier: Modifier = Modifier.height(42.dp)
