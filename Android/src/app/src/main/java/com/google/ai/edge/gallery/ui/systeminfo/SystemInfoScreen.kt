@@ -37,6 +37,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -278,6 +280,8 @@ private fun AiRuntimeSection(
           NpuProbePanel(
             state = npuProbeState,
             candidates = npuCandidates,
+            snapshot = snapshot,
+            buildInfo = viewModel.buildInfo,
             onSelectModel = { viewModel.selectNpuCandidate(it) },
             onRunProbe = { viewModel.runNpuProbe(modelManagerViewModel) },
           )
@@ -291,6 +295,8 @@ private fun AiRuntimeSection(
 private fun NpuProbePanel(
   state: NpuProbeUiState,
   candidates: List<Model>,
+  snapshot: SystemInfoSnapshot,
+  buildInfo: BuildInfoSnapshot,
   onSelectModel: (String) -> Unit,
   onRunProbe: () -> Unit,
 ) {
@@ -329,11 +335,46 @@ private fun NpuProbePanel(
       InfoRow("Artifact", selectedModel.downloadFileName, monospace = true)
       InfoRow("Backend", selectedModel.accelerators.joinToString(" / ") { it.label })
       InfoRow("Target SoC", selectedModel.targetSoc ?: "generic")
-      InfoRow("Detected SoC", Build.SOC_MODEL.ifEmpty { "—" }, monospace = true)    }
+      InfoRow("Detected SoC", Build.SOC_MODEL.ifEmpty { "—" }, monospace = true)
+    }
   }
+
+  var diagnosticsCopied by remember { mutableStateOf(false) }
 
   Button(onClick = onRunProbe, enabled = selectedModel != null) {
     Text("Probe NPU", style = MaterialTheme.typography.labelLarge)
+  }
+
+  val clipboard = LocalClipboardManager.current
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    modifier = Modifier.padding(top = 8.dp),
+  ) {
+    OutlinedButton(
+      onClick = {
+        clipboard.setText(
+          AnnotatedString(
+            composeNpuDiagnostics(
+              build = buildInfo,
+              device = snapshot.device,
+              probeStatus = state.status,
+              result = state.result,
+            )
+          )
+        )
+        diagnosticsCopied = true
+      },
+    ) {
+      Text("Copy diagnostics", style = MaterialTheme.typography.labelLarge)
+    }
+  }
+  if (diagnosticsCopied) {
+    Text(
+      "Diagnostics copied to clipboard",
+      style = MaterialTheme.typography.labelSmall,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
   }
 
   val result = state.result ?: return
@@ -346,6 +387,26 @@ private fun NpuProbePanel(
     InfoRow("nativeLibraryDir", precheck.nativeLibraryDir, monospace = true)
     InfoRow("Model path", precheck.modelPath, monospace = true)
     InfoRow("Vendor", precheck.vendorLabel)
+    if (precheck.socModel.isNotEmpty()) {
+      InfoRow("Precheck SoC", precheck.socModel, monospace = true)
+    }
+    if (precheck.htpGeneration.isNotEmpty()) {
+      InfoRow("HTP generation", precheck.htpGeneration)
+    }
+    if (precheck.vendorDispatchMissingLibs.isNotEmpty()) {
+      InfoRow(
+        "Missing required libs",
+        precheck.vendorDispatchMissingLibs.joinToString("\n"),
+        monospace = true,
+      )
+    }
+    if (precheck.vendorDispatchErrors.isNotEmpty()) {
+      InfoRow(
+        "Vendor errors",
+        precheck.vendorDispatchErrors.joinToString("\n"),
+        monospace = true,
+      )
+    }
     InfoRow(
       "Vendor dispatch dir",
       precheck.vendorDispatchDirPath.ifEmpty { "—" },

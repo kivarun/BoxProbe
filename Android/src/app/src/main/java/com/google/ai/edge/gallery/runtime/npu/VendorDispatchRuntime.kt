@@ -32,28 +32,73 @@ private const val TAG = "VendorDispatchRuntime"
  */
 enum class NpuDispatchVendor(val dirName: String, val label: String) {
   MEDIATEK("mediatek", "MediaTek"),
+  QUALCOMM("qualcomm", "Qualcomm"),
 }
+
+/**
+ * Hexagon HTP generations with a production Qualcomm runtime set. A generation exists
+ * here only once its required library set is verified; other SoCs map to null instead
+ * of a speculative entry.
+ */
+enum class NpuHtpGeneration(val dirSuffix: String, val label: String) {
+  V81("V81", "V81"),
+}
+
+/** Qualcomm SoCs with a production HTP generation, matched on `Build.SOC_MODEL`. */
+private val QUALCOMM_SOC_TO_HTP: Map<String, NpuHtpGeneration> = mapOf(
+  "sm8850" to NpuHtpGeneration.V81,
+)
+
+/**
+ * Maps a Qualcomm `Build.SOC_MODEL` value onto its production HTP generation, or null
+ * when the SoC has no verified production runtime set. Matching is case-insensitive
+ * and trimmed; no device model/brand is consulted.
+ */
+fun qualcommHtpGenerationForSoc(socModel: String): NpuHtpGeneration? =
+  QUALCOMM_SOC_TO_HTP[socModel.trim().lowercase()]
 
 /**
  * Non-system libraries required by LiteRT to initialize the vendor NPU dispatch path.
  *
  * Determined from the actual DT_NEEDED requirements of the bundled vendor libraries.
+ *
+ * The MediaTek set matches the production MediaTek dispatch; the Qualcomm set is the
+ * SM8850/HTP V81 runtime (LiteRT v2.1.5 JIT dispatch/plugin + QAIRT 2.44.0.260225).
+ * A Qualcomm SoC without a verified HTP generation maps to an empty set: nothing is
+ * prepared instead of guessing a partial runtime.
  */
-fun npuRequiredLibNames(vendor: NpuDispatchVendor): List<String> =
+fun npuRequiredLibNames(vendor: NpuDispatchVendor, socModel: String = ""): List<String> =
   when (vendor) {
     NpuDispatchVendor.MEDIATEK ->
       listOf("libLiteRtDispatch_MediaTek.so", "libLiteRtCompilerPlugin_MediaTek.so")
+    NpuDispatchVendor.QUALCOMM ->
+      when (val generation = qualcommHtpGenerationForSoc(socModel)) {
+        null -> emptyList()
+        else ->
+          listOf(
+            "libLiteRtDispatch_Qualcomm.so",
+            "libLiteRtCompilerPlugin_Qualcomm.so",
+            "libQnnSystem.so",
+            "libQnnHtp.so",
+            "libQnnHtpPrepare.so",
+            "libQnnIr.so",
+            "libQnnSaver.so",
+            "libQnnHtp${generation.dirSuffix}Stub.so",
+            "libQnnHtp${generation.dirSuffix}Skel.so",
+          )
+      }
   }
 
 /**
  * Maps the device's SoC vendor onto the production NPU dispatch vendor, or null when
- * the device has no production-supported NPU dispatch runtime. Non-MediaTek vendors
- * remain known to the System Info layer but do not exist in the production runtime
- * until their dispatch runtime is implemented.
+ * the device has no production-supported NPU dispatch runtime. Vendors remain known to
+ * the System Info layer but do not exist in the production runtime until their dispatch
+ * runtime is implemented.
  */
 fun npuDispatchVendorForDevice(socVendor: SocVendor): NpuDispatchVendor? =
   when (socVendor) {
     SocVendor.MEDIATEK -> NpuDispatchVendor.MEDIATEK
+    SocVendor.QUALCOMM -> NpuDispatchVendor.QUALCOMM
     else -> null
   }
 
@@ -141,6 +186,10 @@ data class VendorDispatchPreparation(
   val missingRequired: List<String>,
   val symlinkMode: Boolean,
   val errors: List<String>,
+  /** The raw device SoC model the preparation was computed for, if known. */
+  val socModel: String = "",
+  /** The production HTP generation selected for this SoC, empty when not applicable. */
+  val htpGeneration: String = "",
 ) {
   val ok: Boolean
     get() = errors.isEmpty() && missingRequired.isEmpty()
@@ -158,14 +207,31 @@ data class VendorDispatchPreparation(
 fun prepareVendorDispatchRuntime(
   context: Context,
   vendor: NpuDispatchVendor,
+  socModel: String = "",
 ): VendorDispatchPreparation {
   val vendorDispatchDir = File(context.filesDir, "runtime-dispatch/${vendor.dirName}")
+  val required = npuRequiredLibNames(vendor, socModel)
+  if (required.isEmpty()) {
+    return VendorDispatchPreparation(
+      vendor = vendor,
+      vendorDispatchDir = vendorDispatchDir,
+      socModel = socModel,
+      htpGeneration = qualcommHtpGenerationForSoc(socModel)?.label ?: "",
+      dirExists = false,
+      visibleSoNames = emptyList(),
+      missingRequired = emptyList(),
+      symlinkMode = false,
+      errors = listOf("No production library set for ${vendor.label} SoC '$socModel'"),
+    )
+  }
 
   val nativeLibraryDir: String = context.applicationInfo.nativeLibraryDir ?: ""
   if (nativeLibraryDir.isEmpty()) {
     return VendorDispatchPreparation(
       vendor = vendor,
       vendorDispatchDir = vendorDispatchDir,
+      socModel = socModel,
+      htpGeneration = qualcommHtpGenerationForSoc(socModel)?.label ?: "",
       dirExists = false,
       visibleSoNames = emptyList(),
       missingRequired = emptyList(),
@@ -173,8 +239,6 @@ fun prepareVendorDispatchRuntime(
       errors = listOf("applicationInfo.nativeLibraryDir is null or empty"),
     )
   }
-
-  val required = npuRequiredLibNames(vendor)
 
   val nativeLibraryDirFile = File(nativeLibraryDir)
   val availableSoNames =
@@ -185,6 +249,8 @@ fun prepareVendorDispatchRuntime(
     return VendorDispatchPreparation(
       vendor = vendor,
       vendorDispatchDir = vendorDispatchDir,
+      socModel = socModel,
+      htpGeneration = qualcommHtpGenerationForSoc(socModel)?.label ?: "",
       dirExists = false,
       visibleSoNames = emptyList(),
       missingRequired = missing,
@@ -202,6 +268,8 @@ fun prepareVendorDispatchRuntime(
     return VendorDispatchPreparation(
       vendor = vendor,
       vendorDispatchDir = vendorDispatchDir,
+      socModel = socModel,
+      htpGeneration = qualcommHtpGenerationForSoc(socModel)?.label ?: "",
       dirExists = false,
       visibleSoNames = emptyList(),
       missingRequired = emptyList(),
@@ -273,6 +341,8 @@ fun prepareVendorDispatchRuntime(
     missingRequired = emptyList(),
     symlinkMode = symlinkMode,
     errors = errors,
+    socModel = socModel,
+    htpGeneration = qualcommHtpGenerationForSoc(socModel)?.label ?: "",
   )
 }
 
@@ -293,13 +363,18 @@ fun resolveNpuNativeLibraryDir(
  * Detects the device's production NPU dispatch vendor and prepares its runtime, or
  * null when the device has no production-supported NPU dispatch vendor.
  */
-fun prepareVendorDispatchRuntimeForDevice(context: Context): VendorDispatchPreparation? =
-  npuDispatchVendorForDevice(
-    SocVendorDetector.detect(
-      socManufacturer = Build.SOC_MANUFACTURER ?: "",
-      socModel = Build.SOC_MODEL ?: "",
-    ),
-  )?.let { prepareVendorDispatchRuntime(context, it) }
+fun prepareVendorDispatchRuntimeForDevice(context: Context): VendorDispatchPreparation? {
+  val socManufacturer = Build.SOC_MANUFACTURER ?: ""
+  val socModel = Build.SOC_MODEL ?: ""
+  val vendor =
+    npuDispatchVendorForDevice(
+      SocVendorDetector.detect(
+        socManufacturer = socManufacturer,
+        socModel = socModel,
+      ),
+    ) ?: return null
+  return prepareVendorDispatchRuntime(context, vendor, socModel = socModel)
+}
 
 /**
  * Native library directory for the production NPU backend.

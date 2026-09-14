@@ -122,8 +122,8 @@ android {
   // NPU backend resolves vendor dispatch libraries relative to `nativeLibraryDir`.
   // Groovy-style dynamic invocation: the legacy (android.newDsl=false) decorated
   // extension rejects the statically typed Kotlin DSL lambdas.
-  // The two foreign dispatch runtimes are excluded from the APK so LiteRT cannot
-  // pick them; MediaTek dispatch remains the only dispatch runtime.
+  // The GoogleTensor dispatch runtime is excluded from the APK so LiteRT cannot pick
+  // it: production NPU support exists for MediaTek and Qualcomm (SM8850/HTP V81) only.
   // Both LiteRT artifacts bundle the runtime core; the deduplication below must
   // keep the `com.google.ai.edge.litert:litert` copy (the build ships the
   // self-contained MediaTek dispatch that matches this exact runtime build).
@@ -134,7 +134,6 @@ android {
         "setExcludes"(
           setOf(
             "**/libLiteRtDispatch_GoogleTensor.so",
-            "**/libLiteRtDispatch_Qualcomm.so",
           )
         )
         "setPickFirsts"(

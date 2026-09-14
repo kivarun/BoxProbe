@@ -50,6 +50,10 @@ data class NpuProbePrecheck(
   val vendorDispatchDirExists: Boolean = false,
   val vendorDispatchVisibleSoCount: Int = 0,
   val vendorDispatchVisibleSoNames: List<String> = emptyList(),
+  val socModel: String = "",
+  val htpGeneration: String = "",
+  val vendorDispatchMissingLibs: List<String> = emptyList(),
+  val vendorDispatchErrors: List<String> = emptyList(),
 )
 
 enum class NpuProbeStatus {
@@ -257,12 +261,20 @@ object NpuRuntimeProbe {
     var vendorDispatchDirExists = false
     var vendorDispatchSoCount = 0
     var vendorDispatchSoNames: List<String> = emptyList()
+    var socModel = ""
+    var htpGeneration = ""
+    var vendorDispatchMissingLibs: List<String> = emptyList()
+    var vendorDispatchErrors: List<String> = emptyList()
     if (vendorPreparation != null) {
       vendorLabel = vendorPreparation.vendor.label
       vendorDispatchDirPath = vendorPreparation.vendorDispatchDir.absolutePath
       vendorDispatchDirExists = vendorPreparation.vendorDispatchDir.isDirectory
       vendorDispatchSoCount = vendorPreparation.visibleSoNames.size
       vendorDispatchSoNames = vendorPreparation.visibleSoNames
+      socModel = vendorPreparation.socModel
+      htpGeneration = vendorPreparation.htpGeneration
+      vendorDispatchMissingLibs = vendorPreparation.missingRequired
+      vendorDispatchErrors = vendorPreparation.errors
     }
     return NpuProbePrecheck(
       model = modelName,
@@ -277,6 +289,10 @@ object NpuRuntimeProbe {
       vendorDispatchDirExists = vendorDispatchDirExists,
       vendorDispatchVisibleSoCount = vendorDispatchSoCount,
       vendorDispatchVisibleSoNames = vendorDispatchSoNames.take(MAX_LISTED_SO_NAMES),
+      socModel = socModel,
+      htpGeneration = htpGeneration,
+      vendorDispatchMissingLibs = vendorDispatchMissingLibs,
+      vendorDispatchErrors = vendorDispatchErrors,
     )
   }
 }
