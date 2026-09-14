@@ -54,6 +54,74 @@ private const val TAG = "AGDownloadWorker"
 
 data class UrlAndFileName(val url: String, val fileName: String)
 
+/**
+ * Decides how a download attempt must treat an existing partial (tmp) file.
+ *
+ * @param responseCode HTTP response code for this attempt.
+ * @param rangeRequested true when a `Range: bytes=<tmp>-` header was sent.
+ * @param contentRange raw `Content-Range` header value, e.g. `bytes 100-999/1000` (may be null).
+ * @param tmpFileSize size of the partial tmp file before this attempt started appending.
+ * @param contentLength raw `Content-Length` header value for non-partial responses (may be null).
+ */
+enum class ResumeDecision { RESUME, RESTART_FROM_ZERO, FINALIZE }
+
+fun decideResume(
+  responseCode: Int,
+  rangeRequested: Boolean,
+  contentRange: String?,
+  tmpFileSize: Long,
+  contentLength: Long,
+): ResumeDecision {
+  when (responseCode) {
+    HttpURLConnection.HTTP_PARTIAL -> {
+      val parsed = parseContentRange(contentRange) ?: return ResumeDecision.RESTART_FROM_ZERO
+      val (startByte, endByte) = parsed
+      // The appended part must continue exactly at the end of the existing tmp file.
+      if (tmpFileSize != startByte) {
+        return ResumeDecision.RESTART_FROM_ZERO
+      }
+      // Range fully satisfied already: nothing to write.
+      if (startByte > endByte) {
+        return ResumeDecision.FINALIZE
+      }
+      return ResumeDecision.RESUME
+    }
+    HttpURLConnection.HTTP_OK -> {
+      // Server ignored our Range request and restarts from the beginning: appending
+      // would duplicate content onto the partial file.
+      if (rangeRequested && tmpFileSize > 0) {
+        return ResumeDecision.RESTART_FROM_ZERO
+      }
+      return ResumeDecision.RESUME
+    }
+    // Range Not Satisfiable: the tmp file may already contain the complete file.
+    416 -> {
+      val total = parseContentRange(contentRange)?.second?.plus(1) ?: contentLength
+      if (total > 0 && tmpFileSize == total) {
+        return ResumeDecision.FINALIZE
+      }
+      return ResumeDecision.RESTART_FROM_ZERO
+    }
+    else -> return ResumeDecision.RESTART_FROM_ZERO
+  }
+}
+
+/** Parses `bytes S-E/T` into (S, E); returns null for malformed values. */
+fun parseContentRange(contentRange: String?): Pair<Long, Long>? {
+  if (contentRange == null) {
+    return null
+  }
+  return try {
+    val rangeParts = contentRange.substringAfter("bytes ").split("/")
+    val byteRange = rangeParts[0].split("-")
+    val startByte = byteRange[0].toLong()
+    val endByte = byteRange[1].toLong()
+    Pair(startByte, endByte)
+  } catch (_: Exception) {
+    null
+  }
+}
+
 class DownloadWorker(context: Context, params: WorkerParameters) :
   CoroutineWorker(context, params) {
   private val externalFilesDir = context.getExternalFilesDir(null)
@@ -106,12 +174,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
           for (file in allFiles) {
             val url = URL(file.url)
 
-            val connection = url.openConnection() as HttpURLConnection
-            if (accessToken != null) {
-              Log.d(TAG, "Using access token: ${accessToken.subSequence(0, 10)}...")
-              connection.setRequestProperty("Authorization", "Bearer $accessToken")
-            }
-
             // Prepare output file's dir.
             val outputDir =
               File(
@@ -129,47 +191,78 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
                 listOf(modelDir, version, "${file.fileName}.$TMP_FILE_EXT")
                   .joinToString(separator = File.separator),
               )
-            val outputFileBytes = outputTmpFile.length()
-            if (outputFileBytes > 0) {
+
+            // Claim exclusive write access to the tmp file. WorkManager retries and
+            // REPLACE-policy re-enqueues can start a new worker while a previous
+            // (canceled-but-draining) instance still writes to the same tmp file;
+            // two concurrent append streams produce a corrupted file.
+            val lockChannel =
+              java.io.RandomAccessFile(outputTmpFile, "rw").channel
+            val fileLock = lockChannel.tryLock()
+            if (fileLock == null) {
+              Log.w(TAG, "Tmp file '${outputTmpFile.name}' is locked by another download writer.")
+              lockChannel.close()
+              return@withContext Result.retry()
+            }
+
+            try {
+            val resumeAttempt = outputTmpFile.length() > 0
+            if (resumeAttempt) {
               Log.d(
                 TAG,
-                "File '${outputTmpFile.name}' partial size: ${outputFileBytes}. Trying to resume download",
+                "File '${outputTmpFile.name}' partial size: ${outputTmpFile.length()}. Trying to resume download",
               )
-              connection.setRequestProperty("Range", "bytes=${outputFileBytes}-")
-              // Force the server to send non-compressed data to make download resuming work.
-              connection.setRequestProperty("Accept-Encoding", "identity")
             }
+            val connection =
+              openDownloadConnection(
+                url = url,
+                accessToken = accessToken,
+                resumeFrom = if (resumeAttempt) outputTmpFile.length() else 0,
+              )
             connection.connect()
-            Log.d(TAG, "response code: ${connection.responseCode}")
+            val responseCode = connection.responseCode
+            Log.d(TAG, "response code: $responseCode")
 
-            if (
-              connection.responseCode == HttpURLConnection.HTTP_OK ||
-                connection.responseCode == HttpURLConnection.HTTP_PARTIAL
-            ) {
-              val contentRange = connection.getHeaderField("Content-Range")
+            val decision =
+              decideResume(
+                responseCode = responseCode,
+                rangeRequested = resumeAttempt,
+                contentRange = connection.getHeaderField("Content-Range"),
+                tmpFileSize = if (resumeAttempt) outputTmpFile.length() else 0,
+                contentLength = connection.getHeaderField("Content-Length")?.toLongOrNull() ?: 0,
+              )
+            Log.d(TAG, "Resume decision: $decision")
 
-              if (contentRange != null) {
-                // Parse the Content-Range header
-                val rangeParts = contentRange.substringAfter("bytes ").split("/")
-                val byteRange = rangeParts[0].split("-")
-                val startByte = byteRange[0].toLong()
-                val endByte = byteRange[1].toLong()
-
-                Log.d(
-                  TAG,
-                  "Content-Range: $contentRange. Start bytes: ${startByte}, end bytes: $endByte",
-                )
-
-                downloadedBytes += startByte
-              } else {
-                Log.d(TAG, "Download starts from beginning.")
+            val append =
+              when (decision) {
+                ResumeDecision.RESUME -> true
+                ResumeDecision.FINALIZE -> false
+                ResumeDecision.RESTART_FROM_ZERO -> {
+                  // Server ignored the Range request or the range start does not match
+                  // the tmp file: appending would produce a corrupted file.
+                  Log.d(TAG, "Restarting download from beginning: deleting tmp file.")
+                  outputTmpFile.delete()
+                  false
+                }
               }
-            } else {
-              throw IOException("HTTP error code: ${connection.responseCode}")
-            }
+
+            // Expected size for the final integrity check.
+            val expectedTotalBytes =
+              when (responseCode) {
+                HttpURLConnection.HTTP_PARTIAL ->
+                  parseContentRange(connection.getHeaderField("Content-Range"))?.second?.plus(1) ?: 0
+                HttpURLConnection.HTTP_OK ->
+                  connection.getHeaderField("Content-Length")?.toLongOrNull() ?: 0
+                else -> 0
+              }
 
             val inputStream = connection.inputStream
-            val outputStream = FileOutputStream(outputTmpFile, true /* append */)
+            val outputStream = FileOutputStream(outputTmpFile, append)
+
+            // Count the already-present partial bytes as progress for resumed downloads.
+            if (append && resumeAttempt) {
+              downloadedBytes += outputTmpFile.length()
+            }
 
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             var bytesRead: Int
@@ -218,6 +311,20 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
 
             outputStream.close()
             inputStream.close()
+            connection.disconnect()
+
+            // Integrity check: the downloaded file must match the server-reported size.
+            // A mismatch means the tmp file was corrupted (e.g. by a stale writer);
+            // delete it so the retry starts from scratch.
+            val finalSize = outputTmpFile.length()
+            if (expectedTotalBytes > 0 && finalSize != expectedTotalBytes) {
+              val msg =
+                "Downloaded file size mismatch for '${outputTmpFile.name}': " +
+                  "expected $expectedTotalBytes, got $finalSize. Deleting tmp file."
+              Log.e(TAG, msg)
+              outputTmpFile.delete()
+              throw IOException(msg)
+            }
 
             // Rename the tmp file to the original file name by removing the tmp file ext.
             val originalFilePath = outputTmpFile.absolutePath.replace(".$TMP_FILE_EXT", "")
@@ -278,6 +385,10 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
               val zipFile = File(zipFilePath)
               zipFile.delete()
             }
+            } finally {
+              fileLock.release()
+              lockChannel.close()
+            }
           }
           Result.success()
         } catch (e: IOException) {
@@ -289,4 +400,30 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
       }
     }
   }
+
+  private fun openDownloadConnection(
+    url: URL,
+    accessToken: String?,
+    resumeFrom: Long,
+  ): HttpURLConnection {
+    val connection = url.openConnection() as HttpURLConnection
+    if (accessToken != null) {
+      Log.d(TAG, "Using access token: ${accessToken.subSequence(0, 10)}...")
+      connection.setRequestProperty("Authorization", "Bearer $accessToken")
+    }
+    if (resumeFrom > 0) {
+      connection.setRequestProperty("Range", "bytes=$resumeFrom-")
+      // Force the server to send non-compressed data to make download resuming work.
+      connection.setRequestProperty("Accept-Encoding", "identity")
+    }
+    // Do not let a stalled server block a canceled worker forever: an interrupted
+    // (canceled) worker keeps draining its stream and would otherwise hold the
+    // tmp-file lock indefinitely.
+    connection.readTimeout = DOWNLOAD_READ_TIMEOUT_MS
+    connection.connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
+    return connection
+  }
 }
+
+private const val DOWNLOAD_READ_TIMEOUT_MS = 30_000
+private const val DOWNLOAD_CONNECT_TIMEOUT_MS = 15_000
