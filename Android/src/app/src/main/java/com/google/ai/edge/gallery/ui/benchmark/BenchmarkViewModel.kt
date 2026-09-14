@@ -49,6 +49,29 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AGBenchmarkVM"
 
+/**
+ * Decides whether a finished benchmark run may enter the persistent benchmark
+ * history.
+ *
+ * CPU/GPU runs persist on success. An NPU run persists only when the delegate
+ * classifier proved DispatchDelegate delegation — a CPU/XNNPACK fallback or an
+ * unknown verdict must never be stored as an NPU result. A failed run never
+ * persists (the caller only reaches persistence after a successful run loop).
+ */
+fun shouldPersistBenchmark(
+  accelerator: String,
+  delegateVerdict: NpuDelegateVerdict,
+  benchmarkSucceeded: Boolean,
+): Boolean {
+  if (!benchmarkSucceeded) {
+    return false
+  }
+  if (!accelerator.equals("npu", ignoreCase = true)) {
+    return true
+  }
+  return delegateVerdict == NpuDelegateVerdict.DISPATCH_DELEGATED
+}
+
 enum class Aggregation(val label: String) {
   AVG(label = "avg"),
   MEDIAN(label = "median"),
@@ -181,7 +204,22 @@ constructor(
       }
       val endMs = System.currentTimeMillis()
 
-      // Create and add benchmark result.
+      // Delegate evidence must exist BEFORE any persistence decision: an NPU-marked
+      // benchmark whose partitioning logs do not prove DispatchDelegate delegation
+      // must never enter the persistent benchmark history as an NPU result.
+      var delegateVerdict = NpuDelegateVerdict.UNKNOWN
+      if (accelerator.lowercase() == "npu") {
+        val captured = captureSelfLogcatLines(sinceMs = runStartWallClock)
+        delegateVerdict = classifyDelegateLines(captured).verdict
+        if (delegateVerdict != NpuDelegateVerdict.DISPATCH_DELEGATED) {
+          Log.w(
+            TAG,
+            "NPU benchmark delegate guard: $delegateVerdict — result will not be persisted",
+          )
+        }
+      }
+
+      // Create benchmark result and persist it only when the run qualifies.
       val basicInfo =
         LlmBenchmarkBasicInfo.newBuilder()
           .setStartMs(startMs)
@@ -208,40 +246,27 @@ constructor(
             LlmBenchmarkResult.newBuilder().setBaiscInfo(basicInfo).setStats(stats).build()
           )
           .build()
-      val newId = addBenchmarkResult(result = result)
-      collapseAll()
-      setExpanded(id = newId, expanded = true)
+      if (shouldPersistBenchmark(accelerator, delegateVerdict, benchmarkSucceeded = true)) {
+        val newId = addBenchmarkResult(result = result)
+        collapseAll()
+        setExpanded(id = newId, expanded = true)
+      }
+      _uiState.update {
+        it.copy(
+          lastAccelerator = accelerator,
+          delegateVerdict = delegateVerdict,
+          npuValidated = delegateVerdict == NpuDelegateVerdict.DISPATCH_DELEGATED,
+        )
+      }
       } catch (t: Throwable) {
         Log.e(TAG, "Benchmark run failed", t)
         setRunError(error = t.message ?: t.javaClass.simpleName)
+        _uiState.update { it.copy(lastAccelerator = accelerator, npuValidated = false) }
       } finally {
         if (needCleanUpCacheDir && benchmarkCacheDir.isDirectory) {
           benchmarkCacheDir.deleteRecursively()
           Log.d(TAG, "Cleaned up benchmark cache dir: ${benchmarkCacheDir.absolutePath}")
         }
-      }
-
-      // Delegate guard: an NPU-marked benchmark must only be presented as an NPU
-      // result when the partitioning logs prove DispatchDelegate delegation.
-      if (accelerator.lowercase() == "npu") {
-        val captured = captureSelfLogcatLines(sinceMs = runStartWallClock)
-        val evidence = classifyDelegateLines(captured)
-        _uiState.update {
-          it.copy(
-            lastAccelerator = accelerator,
-            delegateVerdict = evidence.verdict,
-            npuValidated = evidence.verdict == NpuDelegateVerdict.DISPATCH_DELEGATED,
-          )
-        }
-        if (evidence.verdict != NpuDelegateVerdict.DISPATCH_DELEGATED) {
-          Log.w(
-            TAG,
-            "NPU benchmark delegate guard: ${evidence.verdict} " +
-              "(evidence lines: ${evidence.partitionLines.size})",
-          )
-        }
-      } else {
-        _uiState.update { it.copy(lastAccelerator = accelerator, npuValidated = false) }
       }
 
       setRunning(running = false)

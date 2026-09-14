@@ -276,10 +276,11 @@ fun BenchmarkScreen(
     }
 
     // Delegate guard: an NPU-marked benchmark without DispatchDelegate evidence must
-    // never be readable as an NPU performance result.
+    // never be readable as an NPU performance result. Unvalidated NPU results are not
+    // persisted, so the marker is shown for the (transient) attempt itself.
     if (
       uiState.lastAccelerator.equals("npu", ignoreCase = true) &&
-        uiState.results.isNotEmpty() &&
+        !uiState.running &&
         !uiState.npuValidated
     ) {
       Text(
