@@ -264,6 +264,16 @@ fun BenchmarkScreen(
       }
     }
 
+    // Run error surface: a failed engine init / run shows here instead of crashing.
+    if (uiState.runError.isNotEmpty()) {
+      Text(
+        text = uiState.runError,
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+      )
+    }
+
     // Results viewer.
     AnimatedVisibility(
       visible = uiState.showResultsViewer,

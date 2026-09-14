@@ -71,6 +71,8 @@ data class BenchmarkUiState(
   val running: Boolean = false,
   val totalRunCount: Int = 0,
   val completedRunCount: Int = 0,
+  /** Set when a run failed with a runtime error; surfaces the error without crashing. */
+  val runError: String = "",
 )
 
 @HiltViewModel
@@ -101,6 +103,7 @@ constructor(
   ) {
     viewModelScope.launch(Dispatchers.Default) {
       setRunning(running = true)
+      setRunError(error = "")
       setRunProgress(completedRunCount = 0)
       setTotalRunCount(totalRunCount = runCount)
       setShowResultsViewer(showResultsViewer = true)
@@ -115,17 +118,18 @@ constructor(
         )
       Log.d(TAG, "Running benchmark: ${parts.joinToString("\n")}")
 
-      // TODO: handle error.
+      // Create a temporary cache dir to run benchmark in.
+      val timestamp = System.currentTimeMillis()
+      var needCleanUpCacheDir = true
+      val benchmarkCacheDir = File(appContext.cacheDir, "benchmark_$timestamp")
+
+      try {
       val startMs = System.currentTimeMillis()
       val prefillSpeeds = mutableListOf<Double>()
       val decodeSpeeds = mutableListOf<Double>()
       val timesToFirstToken = mutableListOf<Double>()
       var firstInitTime = 0.0
       val nonFirstInitTimes = mutableListOf<Double>()
-      // Create a temporary cache dir to run benchmark in.
-      val timestamp = System.currentTimeMillis()
-      var needCleanUpCacheDir = true
-      val benchmarkCacheDir = File(appContext.cacheDir, "benchmark_$timestamp")
       var cacheDirPath = benchmarkCacheDir.absolutePath
       if (!benchmarkCacheDir.mkdirs()) {
         Log.e(TAG, "Failed to create benchmark cache directory: ${benchmarkCacheDir.absolutePath}")
@@ -166,10 +170,6 @@ constructor(
         setRunProgress(completedRunCount = i + 1)
       }
       val endMs = System.currentTimeMillis()
-      if (needCleanUpCacheDir) {
-        benchmarkCacheDir.deleteRecursively()
-        Log.d(TAG, "Cleaned up benchmark cache dir: ${benchmarkCacheDir.absolutePath}")
-      }
 
       // Create and add benchmark result.
       val basicInfo =
@@ -201,9 +201,23 @@ constructor(
       val newId = addBenchmarkResult(result = result)
       collapseAll()
       setExpanded(id = newId, expanded = true)
+      } catch (t: Throwable) {
+        Log.e(TAG, "Benchmark run failed", t)
+        setRunError(error = t.message ?: t.javaClass.simpleName)
+      } finally {
+        if (needCleanUpCacheDir && benchmarkCacheDir.isDirectory) {
+          benchmarkCacheDir.deleteRecursively()
+          Log.d(TAG, "Cleaned up benchmark cache dir: ${benchmarkCacheDir.absolutePath}")
+        }
+      }
 
       setRunning(running = false)
     }
+  }
+
+  /** Kept for structural symmetry with other setters; error state is cleared per run. */
+  fun setRunError(error: String) {
+    _uiState.update { _uiState.value.copy(runError = error) }
   }
 
   fun setShowResultsViewer(showResultsViewer: Boolean) {
