@@ -19,6 +19,8 @@ enum class NpuProbeStage {
   ENGINE_CREATED,
   ENGINE_INITIALIZED,
   CONVERSATION_CREATED,
+  INFERENCE_SMOKE,
+  DELEGATE_VALIDATED,
   SUCCESS,
 }
 
@@ -59,8 +61,14 @@ data class NpuProbePrecheck(
 enum class NpuProbeStatus {
   NOT_PROBED,
   RUNNING,
-  INITIALIZATION_PASSED,
+  /** Engine + conversation ready, inference smoke ran, and the delegate is proven NPU. */
+  SUCCESS,
+  /** Initialization failed before a conversation existed. */
   INITIALIZATION_FAILED,
+  /** Conversation existed but the smoke inference threw. */
+  INFERENCE_FAILED,
+  /** Inference ran but the delegate verdict is not DispatchDelegate — CPU fallback or unknown. */
+  NOT_VALIDATED,
   NO_MODEL,
 }
 
@@ -71,20 +79,31 @@ data class NpuProbeResult(
   /** Stage where the probe stopped, or null when every stage passed (SUCCESS). */
   val failedStage: NpuProbeStage?,
   val totalDurationMs: Long,
+  /** Delegate verdict derived from the probe window's partitioning logs. */
+  val delegateVerdict: NpuDelegateVerdict = NpuDelegateVerdict.UNKNOWN,
+  /** Raw partitioning evidence behind the verdict (may be empty when capture failed). */
+  val delegateEvidence: NpuDelegateEvidence? = null,
+  /** Whether self-logcat capture produced any lines at all. */
+  val logcatCaptureAvailable: Boolean = false,
 )
 
 /**
  * Active probe of the production LiteRT-LM NPU path.
  *
  * It drives the exact runtime path used by `LlmChatModelHelper` — vendor dispatch
- * isolation, `Backend.NPU(nativeLibraryDir = …)`, engine initialization and
- * conversation creation — recording per-stage durations and raw exceptions.
- * No inference is performed and no fallback backend is attempted.
+ * isolation, `Backend.NPU(nativeLibraryDir = …)`, engine initialization, conversation
+ * creation, a minimal smoke inference — recording per-stage durations and raw
+ * exceptions. The probe result counts as validated only when the smoke inference
+ * ran AND the partitioning logs prove the transformer graphs were delegated to the
+ * vendor dispatch delegate (HTP). No fallback backend is attempted.
  */
 object NpuRuntimeProbe {
 
   /** At most this many .so names are recorded in the precheck diagnostics. */
   const val MAX_LISTED_SO_NAMES = 20
+
+  /** Fixed smoke prompt: a few tokens, only to trigger actual graph execution. */
+  const val SMOKE_PROMPT = "Hi"
 
   /**
    * Runs the probe for [model] on the caller thread. Blocking native calls are
@@ -92,6 +111,7 @@ object NpuRuntimeProbe {
    */
   fun run(context: Context, model: Model): NpuProbeResult {
     val startTotal = SystemClock.elapsedRealtime()
+    val probeStartWallClock = System.currentTimeMillis()
     val stageResults = mutableListOf<NpuProbeStageResult>()
 
     // --- Stage 1: PRECHECK (no LiteRT calls). ---
@@ -131,8 +151,9 @@ object NpuRuntimeProbe {
       )
     }
 
-    // --- Stages 2..5: the production initialization path. ---
+    // --- Stages 2..7: the production initialization + execution validation path. ---
     var engine: Engine? = null
+    var smokeThrowable: Throwable? = null
     try {
       val backendStart = SystemClock.elapsedRealtime()
       val backend =
@@ -180,18 +201,56 @@ object NpuRuntimeProbe {
 
       val conversationStart = SystemClock.elapsedRealtime()
       var conversationError: Throwable? = null
-      var conversationCreated = false
+      var conversation: com.google.ai.edge.litertlm.Conversation? = null
       try {
-        val conversation =
-          initialized.createConversation(ConversationConfig(samplerConfig = null))
-        conversation.close()
-        conversationCreated = true
+        conversation = initialized.createConversation(ConversationConfig(samplerConfig = null))
       } catch (t: Throwable) {
         conversationError = t
       }
       stageResults.add(stageResult(NpuProbeStage.CONVERSATION_CREATED, conversationStart, conversationError))
-      if (conversationError != null || !conversationCreated) {
+      if (conversationError != null || conversation == null) {
         return failedResult(precheck, stageResults, NpuProbeStage.CONVERSATION_CREATED, startTotal)
+      }
+
+      // --- INFERENCE_SMOKE: the minimum inference that forces graph execution. ---
+      val smokeStart = SystemClock.elapsedRealtime()
+      try {
+        conversation.sendMessage(SMOKE_PROMPT)
+      } catch (t: Throwable) {
+        smokeThrowable = t
+      }
+      stageResults.add(stageResult(NpuProbeStage.INFERENCE_SMOKE, smokeStart, smokeThrowable))
+      runCatching { conversation.close() }
+      if (smokeThrowable != null) {
+        return failedResult(precheck, stageResults, NpuProbeStage.INFERENCE_SMOKE, startTotal)
+      }
+
+      // --- DELEGATE_VALIDATED: partitioning evidence from this process. ---
+      val delegateStart = SystemClock.elapsedRealtime()
+      val captured = captureSelfLogcatLines(sinceMs = probeStartWallClock)
+      val evidence = classifyDelegateLines(captured)
+      val verdict = evidence.verdict
+      val validated = verdict == NpuDelegateVerdict.DISPATCH_DELEGATED
+      stageResults.add(
+        NpuProbeStageResult(
+          stage = NpuProbeStage.DELEGATE_VALIDATED,
+          durationMs = SystemClock.elapsedRealtime() - delegateStart,
+          passed = validated,
+          exceptionClass = if (validated) null else NpuDelegateVerdict::class.java.name,
+          exceptionMessage =
+            if (validated) null else npuDelegateVerdictLabel(verdict) + delegateOpsSuffix(evidence),
+        ),
+      )
+      if (!validated) {
+        return failedResult(
+          precheck = precheck,
+          stageResults = stageResults,
+          failedStage = NpuProbeStage.DELEGATE_VALIDATED,
+          startTotalMs = startTotal,
+          delegateVerdict = verdict,
+          delegateEvidence = evidence,
+          logcatCaptureAvailable = captured.isNotEmpty(),
+        )
       }
 
       stageResults.add(stageResult(NpuProbeStage.SUCCESS, SystemClock.elapsedRealtime(), null))
@@ -200,6 +259,29 @@ object NpuRuntimeProbe {
         stageResults = stageResults,
         failedStage = null,
         totalDurationMs = elapsedSince(startTotal),
+        delegateVerdict = verdict,
+        delegateEvidence = evidence,
+        logcatCaptureAvailable = captured.isNotEmpty(),
+      )
+    } catch (t: Throwable) {
+      // Any unexpected crash inside the probe itself must not kill the caller.
+      stageResults.add(
+        NpuProbeStageResult(
+          stage = NpuProbeStage.DELEGATE_VALIDATED,
+          durationMs = 0,
+          passed = false,
+          exceptionClass = t.javaClass.name,
+          exceptionMessage = t.message,
+        ),
+      )
+      return failedResult(
+        precheck = precheck,
+        stageResults = stageResults,
+        failedStage = NpuProbeStage.DELEGATE_VALIDATED,
+        startTotalMs = startTotal,
+        delegateVerdict = NpuDelegateVerdict.UNKNOWN,
+        delegateEvidence = null,
+        logcatCaptureAvailable = false,
       )
     } finally {
       try {
@@ -210,17 +292,28 @@ object NpuRuntimeProbe {
     }
   }
 
+  private fun delegateOpsSuffix(evidence: NpuDelegateEvidence): String {
+    val ops = npuDelegateOpsLabel(evidence)
+    return if (ops.isNullOrEmpty()) "" else " ($ops)"
+  }
+
   private fun failedResult(
     precheck: NpuProbePrecheck?,
     stageResults: List<NpuProbeStageResult>,
     failedStage: NpuProbeStage,
     startTotalMs: Long,
+    delegateVerdict: NpuDelegateVerdict = NpuDelegateVerdict.UNKNOWN,
+    delegateEvidence: NpuDelegateEvidence? = null,
+    logcatCaptureAvailable: Boolean = false,
   ): NpuProbeResult =
     NpuProbeResult(
       precheck = precheck,
       stageResults = stageResults,
       failedStage = failedStage,
       totalDurationMs = elapsedSince(startTotalMs),
+      delegateVerdict = delegateVerdict,
+      delegateEvidence = delegateEvidence,
+      logcatCaptureAvailable = logcatCaptureAvailable,
     )
 
   private fun stageResult(

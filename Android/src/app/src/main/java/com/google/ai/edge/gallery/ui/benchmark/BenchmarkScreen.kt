@@ -71,6 +71,7 @@ import com.google.ai.edge.gallery.data.ConfigKey
 import com.google.ai.edge.gallery.data.ConfigKeys
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.NumberSliderConfig
+import com.google.ai.edge.gallery.systeminfo.NpuDelegateVerdict
 import com.google.ai.edge.gallery.data.SegmentedButtonConfig
 import com.google.ai.edge.gallery.data.ValueType
 import com.google.ai.edge.gallery.data.convertValueToTargetType
@@ -270,6 +271,25 @@ fun BenchmarkScreen(
         text = uiState.runError,
         color = MaterialTheme.colorScheme.error,
         style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+      )
+    }
+
+    // Delegate guard: an NPU-marked benchmark without DispatchDelegate evidence must
+    // never be readable as an NPU performance result.
+    if (
+      uiState.lastAccelerator.equals("npu", ignoreCase = true) &&
+        uiState.results.isNotEmpty() &&
+        !uiState.npuValidated
+    ) {
+      Text(
+        text =
+          when (uiState.delegateVerdict) {
+            NpuDelegateVerdict.CPU_FALLBACK -> "NPU NOT VALIDATED — CPU FALLBACK DETECTED"
+            else -> "NPU NOT VALIDATED — delegate unknown"
+          },
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
       )
     }

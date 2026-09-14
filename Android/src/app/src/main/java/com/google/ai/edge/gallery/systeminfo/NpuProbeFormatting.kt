@@ -5,7 +5,13 @@ fun npuProbeRuntimeValidatedLabel(status: NpuProbeStatus, result: NpuProbeResult
   when {
     status == NpuProbeStatus.INITIALIZATION_FAILED ->
       result?.failedStage?.let { "Failed at ${it.name}" } ?: "Initialization failed"
-    status == NpuProbeStatus.INITIALIZATION_PASSED -> "NPU engine + conversation ready"
+    status == NpuProbeStatus.INFERENCE_FAILED -> "Inference smoke failed"
+    status == NpuProbeStatus.NOT_VALIDATED ->
+      when (result?.delegateVerdict) {
+        NpuDelegateVerdict.CPU_FALLBACK -> "CPU fallback — NPU not validated"
+        else -> "Delegate unknown — NPU not validated"
+      }
+    status == NpuProbeStatus.SUCCESS -> "NPU execution validated"
     else -> npuProbeStatusLabel(status)
   }
 
@@ -13,8 +19,10 @@ fun npuProbeStatusLabel(status: NpuProbeStatus): String =
   when (status) {
     NpuProbeStatus.NOT_PROBED -> "Not probed"
     NpuProbeStatus.RUNNING -> "Running…"
-    NpuProbeStatus.INITIALIZATION_PASSED -> "Initialization passed"
+    NpuProbeStatus.SUCCESS -> "Validated"
     NpuProbeStatus.INITIALIZATION_FAILED -> "Initialization failed"
+    NpuProbeStatus.INFERENCE_FAILED -> "Inference failed"
+    NpuProbeStatus.NOT_VALIDATED -> "Not validated"
     NpuProbeStatus.NO_MODEL -> "No downloaded NPU-compatible LiteRT model"
   }
 

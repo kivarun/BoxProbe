@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.gallery.data.Model
 import com.google.ai.edge.gallery.data.SOC
 import com.google.ai.edge.gallery.systeminfo.NpuProbeResult
+import com.google.ai.edge.gallery.systeminfo.NpuProbeStage
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
 import com.google.ai.edge.gallery.systeminfo.NpuRuntimeProbe
 import com.google.ai.edge.gallery.systeminfo.SystemInfoCollector
@@ -166,8 +167,12 @@ constructor(
       _npuProbeState.value =
         NpuProbeUiState(
           status =
-            if (result.failedStage == null) NpuProbeStatus.INITIALIZATION_PASSED
-            else NpuProbeStatus.INITIALIZATION_FAILED,
+            when (result.failedStage) {
+              null -> NpuProbeStatus.SUCCESS
+              NpuProbeStage.INFERENCE_SMOKE -> NpuProbeStatus.INFERENCE_FAILED
+              NpuProbeStage.DELEGATE_VALIDATED -> NpuProbeStatus.NOT_VALIDATED
+              else -> NpuProbeStatus.INITIALIZATION_FAILED
+            },
           result = result,
           selectedModelName = model.name,
         )

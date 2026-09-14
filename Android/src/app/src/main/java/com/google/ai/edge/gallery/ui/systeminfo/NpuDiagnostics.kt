@@ -17,9 +17,12 @@
 package com.google.ai.edge.gallery.ui.systeminfo
 
 import com.google.ai.edge.gallery.systeminfo.DeviceSnapshot
+import com.google.ai.edge.gallery.systeminfo.NpuDelegateEvidence
 import com.google.ai.edge.gallery.systeminfo.NpuProbeResult
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStageResult
 import com.google.ai.edge.gallery.systeminfo.NpuProbeStatus
+import com.google.ai.edge.gallery.systeminfo.npuDelegateOpsLabel
+import com.google.ai.edge.gallery.systeminfo.npuDelegateVerdictLabel
 import com.google.ai.edge.gallery.systeminfo.npuProbeFormatDuration
 import com.google.ai.edge.gallery.systeminfo.npuProbeStatusLabel
 import com.google.ai.edge.gallery.systeminfo.npuProbeStageLabel
@@ -67,6 +70,16 @@ fun composeNpuDiagnostics(
     appendLine("total duration: ${npuProbeFormatDuration(result.totalDurationMs)}")
     for (stage in result.stageResults) {
       appendLine("stage ${stage.stage.name}: ${npuProbeStageLabel(stage)}")
+    }
+    appendLine("delegate verdict: ${npuDelegateVerdictLabel(result.delegateVerdict)}")
+    appendLine("logcat capture available: ${if (result.logcatCaptureAvailable) "yes" else "no"}")
+    npuDelegateOpsLabel(result.delegateEvidence)?.let { appendLine("delegated ops: $it") }
+    val delegateLines = result.delegateEvidence?.partitionLines.orEmpty()
+    if (delegateLines.isNotEmpty()) {
+      appendLine("delegate evidence:")
+      for (line in delegateLines) {
+        appendLine("  $line")
+      }
     }
   }
 }

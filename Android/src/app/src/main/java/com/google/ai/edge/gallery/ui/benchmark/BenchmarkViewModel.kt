@@ -28,6 +28,9 @@ import com.google.ai.edge.gallery.proto.LlmBenchmarkResult
 import com.google.ai.edge.gallery.proto.LlmBenchmarkStats
 import com.google.ai.edge.gallery.proto.ValueSeries
 import com.google.ai.edge.gallery.runtime.npu.npuNativeLibraryDirForDevice
+import com.google.ai.edge.gallery.systeminfo.NpuDelegateVerdict
+import com.google.ai.edge.gallery.systeminfo.captureSelfLogcatLines
+import com.google.ai.edge.gallery.systeminfo.classifyDelegateLines
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.benchmark
@@ -73,6 +76,12 @@ data class BenchmarkUiState(
   val completedRunCount: Int = 0,
   /** Set when a run failed with a runtime error; surfaces the error without crashing. */
   val runError: String = "",
+  /** Accelerator string of the last benchmark invocation ("cpu"/"gpu"/"npu"). */
+  val lastAccelerator: String = "",
+  /** Delegate verdict captured from the partitioning logs of the last benchmark run. */
+  val delegateVerdict: NpuDelegateVerdict = NpuDelegateVerdict.UNKNOWN,
+  /** Whether the last NPU run produced delegation evidence (DispatchDelegate). */
+  val npuValidated: Boolean = false,
 )
 
 @HiltViewModel
@@ -122,6 +131,7 @@ constructor(
       val timestamp = System.currentTimeMillis()
       var needCleanUpCacheDir = true
       val benchmarkCacheDir = File(appContext.cacheDir, "benchmark_$timestamp")
+      val runStartWallClock = System.currentTimeMillis()
 
       try {
       val startMs = System.currentTimeMillis()
@@ -209,6 +219,29 @@ constructor(
           benchmarkCacheDir.deleteRecursively()
           Log.d(TAG, "Cleaned up benchmark cache dir: ${benchmarkCacheDir.absolutePath}")
         }
+      }
+
+      // Delegate guard: an NPU-marked benchmark must only be presented as an NPU
+      // result when the partitioning logs prove DispatchDelegate delegation.
+      if (accelerator.lowercase() == "npu") {
+        val captured = captureSelfLogcatLines(sinceMs = runStartWallClock)
+        val evidence = classifyDelegateLines(captured)
+        _uiState.update {
+          it.copy(
+            lastAccelerator = accelerator,
+            delegateVerdict = evidence.verdict,
+            npuValidated = evidence.verdict == NpuDelegateVerdict.DISPATCH_DELEGATED,
+          )
+        }
+        if (evidence.verdict != NpuDelegateVerdict.DISPATCH_DELEGATED) {
+          Log.w(
+            TAG,
+            "NPU benchmark delegate guard: ${evidence.verdict} " +
+              "(evidence lines: ${evidence.partitionLines.size})",
+          )
+        }
+      } else {
+        _uiState.update { it.copy(lastAccelerator = accelerator, npuValidated = false) }
       }
 
       setRunning(running = false)

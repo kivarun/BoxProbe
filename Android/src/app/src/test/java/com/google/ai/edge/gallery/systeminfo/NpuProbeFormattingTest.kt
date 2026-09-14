@@ -48,6 +48,8 @@ class NpuProbeFormattingTest {
         "ENGINE_CREATED",
         "ENGINE_INITIALIZED",
         "CONVERSATION_CREATED",
+        "INFERENCE_SMOKE",
+        "DELEGATE_VALIDATED",
         "SUCCESS",
       ),
       NpuProbeStage.values().map { it.name },
@@ -58,14 +60,13 @@ class NpuProbeFormattingTest {
   fun statusLabel_coversAllStatuses() {
     assertEquals("Not probed", npuProbeStatusLabel(NpuProbeStatus.NOT_PROBED))
     assertEquals("Running…", npuProbeStatusLabel(NpuProbeStatus.RUNNING))
-    assertEquals(
-      "Initialization passed",
-      npuProbeStatusLabel(NpuProbeStatus.INITIALIZATION_PASSED),
-    )
+    assertEquals("Validated", npuProbeStatusLabel(NpuProbeStatus.SUCCESS))
     assertEquals(
       "Initialization failed",
       npuProbeStatusLabel(NpuProbeStatus.INITIALIZATION_FAILED),
     )
+    assertEquals("Inference failed", npuProbeStatusLabel(NpuProbeStatus.INFERENCE_FAILED))
+    assertEquals("Not validated", npuProbeStatusLabel(NpuProbeStatus.NOT_VALIDATED))
     assertEquals(
       "No downloaded NPU-compatible LiteRT model",
       npuProbeStatusLabel(NpuProbeStatus.NO_MODEL),
@@ -78,10 +79,46 @@ class NpuProbeFormattingTest {
   }
 
   @Test
-  fun runtimeValidatedLabel_passedProbe() {
+  fun runtimeValidatedLabel_successRequiresValidatedDelegate() {
     assertEquals(
-      "NPU engine + conversation ready",
-      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INITIALIZATION_PASSED, null),
+      "NPU execution validated",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.SUCCESS, null),
+    )
+  }
+
+  @Test
+  fun runtimeValidatedLabel_notValidatedReportsFallbackOrUnknown() {
+    val fallback =
+      NpuProbeResult(
+        precheck = null,
+        stageResults = emptyList(),
+        failedStage = NpuProbeStage.DELEGATE_VALIDATED,
+        totalDurationMs = 0,
+        delegateVerdict = NpuDelegateVerdict.CPU_FALLBACK,
+      )
+    assertEquals(
+      "CPU fallback — NPU not validated",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.NOT_VALIDATED, fallback),
+    )
+    val unknown =
+      NpuProbeResult(
+        precheck = null,
+        stageResults = emptyList(),
+        failedStage = NpuProbeStage.DELEGATE_VALIDATED,
+        totalDurationMs = 0,
+        delegateVerdict = NpuDelegateVerdict.UNKNOWN,
+      )
+    assertEquals(
+      "Delegate unknown — NPU not validated",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.NOT_VALIDATED, unknown),
+    )
+  }
+
+  @Test
+  fun runtimeValidatedLabel_inferenceSmokeFailure() {
+    assertEquals(
+      "Inference smoke failed",
+      npuProbeRuntimeValidatedLabel(NpuProbeStatus.INFERENCE_FAILED, null),
     )
   }
 
