@@ -23,15 +23,16 @@ class ModelCatalogParsingTest {
   }
 
   @Test
-  fun catalog_containsExactlyTheFourCuratedEntries() {
+  fun catalog_containsExactlyTheFiveCuratedEntries() {
     val models = loadCatalog().models
-    assertEquals(4, models.size)
+    assertEquals(5, models.size)
     assertEquals(
       setOf(
         "Qwen2.5-1.5B-Instruct",
         "Gemma3-1B-IT",
         "Gemma3-1B-IT-MT6991-NPU",
         "Gemma3-270M-IT-SM8850-NPU",
+        "Gemma3-270M-IT-SM8850-AOT",
       ),
       models.map { it.name }.toSet(),
     )
@@ -111,7 +112,24 @@ class ModelCatalogParsingTest {
     val model = sm8850.toModel()
     assertEquals(listOf(Accelerator.NPU), model.accelerators)
     assertEquals("sm8850", model.targetSoc)
-    assertEquals("Gemma3-270M-IT — SM8850 NPU", model.displayName)
+    assertEquals("Gemma3-270M-IT — SM8850 NPU (JIT/SRQ)", model.displayName)
+  }
+
+  @Test
+  fun gemmaSm8850Aot_artifactFileNameExact_distinctFromJit() {
+    val aot = loadCatalog().models.first { it.name == "Gemma3-270M-IT-SM8850-AOT" }
+    assertEquals("litert-community/gemma-3-270m-it", aot.modelId)
+    assertEquals("gemma3-270m-it-q8.qualcomm.sm8850.litertlm", aot.modelFile)
+    assertEquals("sm8850", aot.targetSoc)
+    assertEquals("9d2093270fb5aa49a986b49b5779d763dde7b630", aot.commitHash)
+    assertEquals(463011840L, aot.sizeInBytes)
+    val model = aot.toModel()
+    assertEquals(listOf(Accelerator.NPU), model.accelerators)
+    assertEquals("Gemma3-270M-IT — SM8850 NPU (AOT)", model.displayName)
+    // The two artifacts must never collide on the same storage identity.
+    val jit = loadCatalog().models.first { it.name == "Gemma3-270M-IT-SM8850-NPU" }
+    assertTrue(aot.modelFile != jit.modelFile)
+    assertTrue(aot.commitHash != jit.commitHash)
   }
 
   @Test
