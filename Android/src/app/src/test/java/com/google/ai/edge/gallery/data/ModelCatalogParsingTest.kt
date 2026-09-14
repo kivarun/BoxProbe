@@ -23,14 +23,15 @@ class ModelCatalogParsingTest {
   }
 
   @Test
-  fun catalog_containsExactlyTheThreeCuratedEntries() {
+  fun catalog_containsExactlyTheFourCuratedEntries() {
     val models = loadCatalog().models
-    assertEquals(3, models.size)
+    assertEquals(4, models.size)
     assertEquals(
       setOf(
         "Qwen2.5-1.5B-Instruct",
         "Gemma3-1B-IT",
         "Gemma3-1B-IT-MT6991-NPU",
+        "Gemma3-270M-IT-SM8850-NPU",
       ),
       models.map { it.name }.toSet(),
     )
@@ -97,5 +98,31 @@ class ModelCatalogParsingTest {
     assertTrue(artifactMatchesDeviceSoc(catalog.getValue("Gemma3-1B-IT"), deviceSoc))
     assertTrue(artifactMatchesDeviceSoc(catalog.getValue("Gemma3-1B-IT-MT6991-NPU"), deviceSoc))
     assertFalse(artifactMatchesDeviceSoc(catalog.getValue("Gemma3-1B-IT-MT6991-NPU"), "sm8650"))
+  }
+
+  @Test
+  fun gemmaSm8850_artifactFileNameExact_andNpuTarget() {
+    val sm8850 = loadCatalog().models.first { it.name == "Gemma3-270M-IT-SM8850-NPU" }
+    assertEquals("mlboydaisuke/gemma-3-270m-it-NPU-LiteRT", sm8850.modelId)
+    assertEquals("gemma-3-270m-it_npu-srq_c896.litertlm", sm8850.modelFile)
+    assertEquals("sm8850", sm8850.targetSoc)
+    assertEquals("46cc76a8a2adaa41e0a441ad44ee57cd7a9c6754", sm8850.commitHash)
+    assertEquals(456853286L, sm8850.sizeInBytes)
+    val model = sm8850.toModel()
+    assertEquals(listOf(Accelerator.NPU), model.accelerators)
+    assertEquals("sm8850", model.targetSoc)
+    assertEquals("Gemma3-270M-IT — SM8850 NPU", model.displayName)
+  }
+
+  @Test
+  fun compatibility_sm8850Model_matchesOnlySm8850Devices() {
+    val sm8850Model =
+      loadCatalog().models.first { it.name == "Gemma3-270M-IT-SM8850-NPU" }.toModel()
+    assertTrue(artifactMatchesDeviceSoc(sm8850Model, "sm8850"))
+    assertTrue(artifactMatchesDeviceSoc(sm8850Model, "SM8850"))
+    // Other SoCs (including MediaTek and unknown Qualcomm) must not see it as compatible.
+    assertFalse(artifactMatchesDeviceSoc(sm8850Model, "mt6991"))
+    assertFalse(artifactMatchesDeviceSoc(sm8850Model, "sm8750"))
+    assertFalse(artifactMatchesDeviceSoc(sm8850Model, "sm8851"))
   }
 }

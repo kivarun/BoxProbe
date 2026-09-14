@@ -52,6 +52,25 @@
         "accelerators": "npu"
       },
       "taskTypes": ["llm_chat", "llm_prompt_lab"]
+    },
+    {
+      "name": "Gemma3-270M-IT-SM8850-NPU",
+      "displayName": "Gemma3-270M-IT \u2014 SM8850 NPU",
+      "modelId": "mlboydaisuke/gemma-3-270m-it-NPU-LiteRT",
+      "modelFile": "gemma-3-270m-it_npu-srq_c896.litertlm",
+      "targetSoc": "sm8850",
+      "description": "[Gemma3-270M-IT](https://huggingface.co/google/gemma-3-270m-it) artifact for the **Qualcomm SM8850** (Snapdragon 8 Elite Gen 5) Hexagon NPU (HTP V81). SRQ bundle compiled on-device at load time (JIT): the first NPU run recompiles the model (~16 s), later runs in the same session are fast. Text-only.",
+      "sizeInBytes": 456853286,
+      "minDeviceMemoryInGb": 2,
+      "commitHash": "46cc76a8a2adaa41e0a441ad44ee57cd7a9c6754",
+      "defaultConfig": {
+        "topK": 64,
+        "topP": 0.95,
+        "temperature": 1.0,
+        "maxTokens": 896,
+        "accelerators": "npu"
+      },
+      "taskTypes": ["llm_chat", "llm_prompt_lab"]
     }
   ]
 }
