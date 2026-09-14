@@ -62,6 +62,15 @@ constructor(@ApplicationContext private val context: Context) : ViewModel() {
   private var streamingAccumulatedText = StringBuilder()
 
   /**
+   * Set when a turn finished on the current runtime conversation. LiteRT-LM 0.12 keeps
+   * routing the per-token callbacks of later turns of the same conversation to the
+   * first turn's listener, so those turns complete with empty chunks; recreating the
+   * conversation between turns restores correct chunk delivery (multi-turn runtime
+   * context is sacrificed, which is acceptable for a smoke test chat).
+   */
+  private var needsRuntimeConversationReset = false
+
+  /**
    * Enters the chat: verifies the model is available locally and initializes it through
    * the production lifecycle. A no-op when the chat is already started for this model.
    */
@@ -108,23 +117,34 @@ constructor(@ApplicationContext private val context: Context) : ViewModel() {
     }
     _uiState.update { onSend(it, text) }
     streamingAccumulatedText = StringBuilder()
-    curModel.runtimeHelper.runInference(
-      model = curModel,
-      input = text,
-      resultListener = { partialResult, done, _ ->
-        if (done) {
-          _uiState.update { onGenerationDone(it) }
-        } else {
-          streamingAccumulatedText.append(partialResult)
-          _uiState.update { onStreamingUpdate(it, streamingAccumulatedText.toString()) }
-        }
-      },
-      cleanUpListener = {},
-      onError = { message ->
-        Log.e(TAG, "Test chat generation error: $message")
-        _uiState.update { onGenerationError(it, message) }
-      },
-    )
+    viewModelScope.launch(Dispatchers.Default) {
+      if (needsRuntimeConversationReset) {
+        needsRuntimeConversationReset = false
+        curModel.runtimeHelper.resetConversation(
+          model = curModel,
+          supportImage = false,
+          supportAudio = false,
+        )
+      }
+      curModel.runtimeHelper.runInference(
+        model = curModel,
+        input = text,
+        resultListener = { partialResult, done, _ ->
+          if (done) {
+            needsRuntimeConversationReset = true
+            _uiState.update { onGenerationDone(it) }
+          } else {
+            streamingAccumulatedText.append(partialResult)
+            _uiState.update { onStreamingUpdate(it, streamingAccumulatedText.toString()) }
+          }
+        },
+        cleanUpListener = {},
+        onError = { message ->
+          Log.e(TAG, "Test chat generation error: $message")
+          _uiState.update { onGenerationError(it, message) }
+        },
+      )
+    }
   }
 
   /** Delegates cancellation to the production runtime; keeps generating until done. */
