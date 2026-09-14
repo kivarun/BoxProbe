@@ -50,6 +50,18 @@ import kotlinx.coroutines.launch
 private const val TAG = "AGBenchmarkVM"
 
 /**
+ * Delegate-diagnostic state for a benchmark invocation. Must be reset at the start
+ * of every run (and on failure) so no verdict from a previous run can survive and
+ * masquerade as this run's outcome.
+ */
+fun BenchmarkUiState.withFreshDelegateState(accelerator: String): BenchmarkUiState =
+  copy(
+    lastAccelerator = accelerator,
+    delegateVerdict = NpuDelegateVerdict.UNKNOWN,
+    npuValidated = false,
+  )
+
+/**
  * Decides whether a finished benchmark run may enter the persistent benchmark
  * history.
  *
@@ -136,6 +148,8 @@ constructor(
     viewModelScope.launch(Dispatchers.Default) {
       setRunning(running = true)
       setRunError(error = "")
+      // No verdict from a previous run may bleed into this one.
+      _uiState.update { it.withFreshDelegateState(accelerator) }
       setRunProgress(completedRunCount = 0)
       setTotalRunCount(totalRunCount = runCount)
       setShowResultsViewer(showResultsViewer = true)
@@ -261,7 +275,9 @@ constructor(
       } catch (t: Throwable) {
         Log.e(TAG, "Benchmark run failed", t)
         setRunError(error = t.message ?: t.javaClass.simpleName)
-        _uiState.update { it.copy(lastAccelerator = accelerator, npuValidated = false) }
+        // The failed run's diagnostic state is its own: unknown verdict, nothing
+        // validated — never the verdict of an earlier run.
+        _uiState.update { it.withFreshDelegateState(accelerator) }
       } finally {
         if (needCleanUpCacheDir && benchmarkCacheDir.isDirectory) {
           benchmarkCacheDir.deleteRecursively()
