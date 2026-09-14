@@ -84,8 +84,9 @@ fun onSend(state: TestChatUiState, text: String): TestChatUiState {
 }
 
 /**
- * Streaming callback: the runtime delivers the accumulated response, so this rewrites the
- * text of the same assistant message instead of creating new ones.
+ * Streaming callback: the runtime delivers one incremental chunk per callback, so the
+ * ViewModel accumulates chunks and rewrites the same assistant message with the full
+ * response so far instead of creating new messages.
  */
 fun onStreamingUpdate(state: TestChatUiState, accumulatedText: String): TestChatUiState {
   val id = state.streamingAssistantMessageId ?: return state

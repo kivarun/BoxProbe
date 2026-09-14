@@ -55,6 +55,13 @@ constructor(@ApplicationContext private val context: Context) : ViewModel() {
   private var disposed = false
 
   /**
+   * Accumulated response text of the current streaming turn. The runtime callback
+   * delivers one incremental chunk per message (not the full response so far), so the
+   * ViewModel owns the accumulation; the state only ever receives the full text.
+   */
+  private var streamingAccumulatedText = StringBuilder()
+
+  /**
    * Enters the chat: verifies the model is available locally and initializes it through
    * the production lifecycle. A no-op when the chat is already started for this model.
    */
@@ -100,6 +107,7 @@ constructor(@ApplicationContext private val context: Context) : ViewModel() {
       return
     }
     _uiState.update { onSend(it, text) }
+    streamingAccumulatedText = StringBuilder()
     curModel.runtimeHelper.runInference(
       model = curModel,
       input = text,
@@ -107,7 +115,8 @@ constructor(@ApplicationContext private val context: Context) : ViewModel() {
         if (done) {
           _uiState.update { onGenerationDone(it) }
         } else {
-          _uiState.update { onStreamingUpdate(it, partialResult) }
+          streamingAccumulatedText.append(partialResult)
+          _uiState.update { onStreamingUpdate(it, streamingAccumulatedText.toString()) }
         }
       },
       cleanUpListener = {},

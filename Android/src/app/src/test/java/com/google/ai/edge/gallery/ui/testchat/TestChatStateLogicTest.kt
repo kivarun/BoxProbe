@@ -63,6 +63,24 @@ class TestChatStateLogicTest {
   }
 
   @Test
+  fun streamingChunks_mustBeAccumulatedByCaller_notRewritten() {
+    // Regression: the runtime callback delivers one incremental CHUNK per message.
+    // The ViewModel accumulates chunks; a caller that rewrites the bubble text with
+    // each raw chunk would end up showing only the last token (e.g. a bare '?').
+    var state = onSend(ready, "hello")
+    val assistantId = state.streamingAssistantMessageId!!
+
+    val accumulated = StringBuilder()
+    for (chunk in listOf("Hel", "lo!", " Nice")) {
+      accumulated.append(chunk)
+      state = onStreamingUpdate(state, accumulated.toString())
+    }
+
+    assertEquals("Hello! Nice", state.messages[1].text)
+    assertEquals(assistantId, state.messages[1].id)
+  }
+
+  @Test
   fun streamingUpdate_ignoredWithoutActiveAssistant() {
     assertEquals(ready, onStreamingUpdate(ready, "late chunk"))
   }
