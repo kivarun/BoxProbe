@@ -1,4 +1,4 @@
-package com.google.ai.edge.gallery.systeminfo
+package com.google.ai.edge.gallery.device
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -40,28 +40,5 @@ class SocVendorDetectorTest {
     assertEquals(enum(UN), SocVendorDetector.detect("Acme Corp", "ACME-1"))
     // Loose prefix must not match.
     assertEquals(enum(UN), SocVendorDetector.detect("", "exynos2400"))
-  }
-
-  @Test
-  fun deviceMatch_bundledVsDevice() {
-    val manufacturer = "Qualcomm"
-    val model = "SM8650"
-    assertEquals(
-      DeviceMatchStatus.YES,
-      SocVendorDetector.deviceMatch(RuntimeVendor.valueOf(QC), manufacturer, model),
-    )
-    assertEquals(
-      DeviceMatchStatus.NO,
-      SocVendorDetector.deviceMatch(RuntimeVendor.valueOf(MTK), manufacturer, model),
-    )
-    assertEquals(
-      DeviceMatchStatus.UNKNOWN,
-      SocVendorDetector.deviceMatch(RuntimeVendor.OTHER, manufacturer, model),
-    )
-    // Unknown device SoC -> unknown match.
-    assertEquals(
-      DeviceMatchStatus.UNKNOWN,
-      SocVendorDetector.deviceMatch(RuntimeVendor.valueOf(QC), "", ""),
-    )
   }
 }

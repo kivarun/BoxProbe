@@ -3,8 +3,8 @@ package com.google.ai.edge.gallery.runtime.npu
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import com.google.ai.edge.gallery.systeminfo.SocVendor
-import com.google.ai.edge.gallery.systeminfo.SocVendorDetector
+import com.google.ai.edge.gallery.device.SocVendor
+import com.google.ai.edge.gallery.device.SocVendorDetector
 import java.io.File
 import java.nio.file.Files
 
@@ -20,7 +20,7 @@ private const val TAG = "VendorDispatchRuntime"
  * symlinks to only the required vendor libraries extracted into
  * `applicationInfo.nativeLibraryDir`.
  *
- * The SoC classification itself ([SocVendorDetector]) lives in the systeminfo layer
+ * The SoC classification itself ([SocVendorDetector]) lives in the neutral device layer
  * and stays shared with the System Info screen; this layer owns only the production
  * dispatch runtime built on top of it.
  */

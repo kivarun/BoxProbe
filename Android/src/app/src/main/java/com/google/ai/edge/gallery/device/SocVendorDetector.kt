@@ -1,4 +1,4 @@
-package com.google.ai.edge.gallery.systeminfo
+package com.google.ai.edge.gallery.device
 
 /**
  * Classifies the probable SoC vendor of a device.
@@ -6,6 +6,9 @@ package com.google.ai.edge.gallery.systeminfo
  * The primary signal is `Build.SOC_MANUFACTURER`; `Build.SOC_MODEL` is used as a careful
  * fallback. The presence of bundled QNN/LiteRT libraries in the APK must never influence
  * this result.
+ *
+ * Neutral, shared SoC classification: it must not depend on any diagnostics or runtime
+ * layer. Consumers (runtime/npu, systeminfo) depend on this layer, never the reverse.
  */
 object SocVendorDetector {
 
@@ -44,30 +47,5 @@ object SocVendorDetector {
     }
 
     return SocVendor.UNKNOWN
-  }
-
-  /**
-   * Maps a [RuntimeVendor] library label onto its [SocVendor] equivalent.
-   */
-  fun toSocVendor(vendor: RuntimeVendor): SocVendor? =
-    when (vendor) {
-      RuntimeVendor.MEDIATEK -> SocVendor.MEDIATEK
-      RuntimeVendor.QUALCOMM -> SocVendor.QUALCOMM
-      RuntimeVendor.GOOGLE_TENSOR -> SocVendor.GOOGLE_TENSOR
-      RuntimeVendor.OTHER -> null
-    }
-  /**
-   * Whether the bundled libraries labelled [vendor] plausibly match a device with the given
-   * SoC identity. Only SoC manufacturer/model are consulted.
-   */
-  fun deviceMatch(
-    vendor: RuntimeVendor,
-    socManufacturer: String,
-    socModel: String,
-  ): DeviceMatchStatus {
-    val soc = toSocVendor(vendor) ?: return DeviceMatchStatus.UNKNOWN
-    val detected = detect(socManufacturer, socModel)
-    if (detected == SocVendor.UNKNOWN) return DeviceMatchStatus.UNKNOWN
-    return if (detected == soc) DeviceMatchStatus.YES else DeviceMatchStatus.NO
   }
 }

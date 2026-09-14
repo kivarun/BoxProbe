@@ -1,6 +1,6 @@
 package com.google.ai.edge.gallery.runtime.npu
 
-import com.google.ai.edge.gallery.systeminfo.SocVendor
+import com.google.ai.edge.gallery.device.SocVendor
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

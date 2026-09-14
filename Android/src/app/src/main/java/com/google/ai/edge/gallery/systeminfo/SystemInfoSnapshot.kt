@@ -1,5 +1,7 @@
 package com.google.ai.edge.gallery.systeminfo
 
+import com.google.ai.edge.gallery.device.SocVendor
+
 /** Whether a probe returned usable data or a structured error. */
 enum class ProbeStatus {
   OK,
@@ -11,14 +13,6 @@ enum class ProbeStatus {
 enum class DeviceMatchStatus {
   YES,
   NO,
-  UNKNOWN,
-}
-
-/** Probable SoC vendor of the device. */
-enum class SocVendor {
-  MEDIATEK,
-  QUALCOMM,
-  GOOGLE_TENSOR,
   UNKNOWN,
 }
 

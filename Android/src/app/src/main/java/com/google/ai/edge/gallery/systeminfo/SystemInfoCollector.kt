@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.FeatureInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import com.google.ai.edge.gallery.device.SocVendor
+import com.google.ai.edge.gallery.device.SocVendorDetector
 import java.io.File
 
 /**
@@ -31,7 +33,7 @@ object SystemInfoCollector {
       RuntimeVendorStatus(
         vendor = vendor,
         bundled = vendorIsBundled(vendor, nativeLibs),
-        deviceMatch = SocVendorDetector.deviceMatch(
+        deviceMatch = RuntimeVendorMatch.deviceMatch(
           vendor = vendor,
           socManufacturer = device.socManufacturer,
           socModel = device.socModel,
@@ -213,9 +215,9 @@ object SystemInfoCollector {
   private fun vendorIsBundled(vendor: RuntimeVendor, libs: NativeLibrariesSnapshot): Boolean =
     (libs.dispatchLibs + libs.compilerPluginLibs).any {
       it.vendorLabel != null &&
-        SocVendorDetector.toSocVendor(
+        RuntimeVendorMatch.toSocVendor(
           NativeLibClassifier.vendorLabelToRuntimeVendor(it.vendorLabel!!),
-        ) == SocVendorDetector.toSocVendor(vendor)
+        ) == RuntimeVendorMatch.toSocVendor(vendor)
     }
 
   private fun safeBuildString(block: () -> String): String = runCatching(block).getOrDefault("")
