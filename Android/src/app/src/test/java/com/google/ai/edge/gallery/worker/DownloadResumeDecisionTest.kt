@@ -4,26 +4,49 @@ import java.net.HttpURLConnection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
-import org.junit.runner.RunWith
 import org.junit.runners.JUnit4
+import org.junit.runner.RunWith
 
 /** Tests for the resume decision logic in [DownloadWorker]'s download loop. */
 @RunWith(JUnit4::class)
 class DownloadResumeDecisionTest {
 
+  // ---- parseContentRange ----
+
   @Test
-  fun cleanStartWithEmptyTmp_resumesWithoutRestart() {
+  fun parse_fullRange() {
     assertEquals(
-      ResumeDecision.RESUME,
-      decideResume(
-        responseCode = HttpURLConnection.HTTP_OK,
-        rangeRequested = false,
-        contentRange = null,
-        tmpFileSize = 0,
-        contentLength = 1000,
-      ),
+      ParsedContentRange(start = 500, end = 999, total = 1000),
+      parseContentRange("bytes 500-999/1000"),
     )
   }
+
+  @Test
+  fun parse_unsatisfiableRange() {
+    assertEquals(
+      ParsedContentRange(start = null, end = null, total = 1000),
+      parseContentRange("bytes */1000"),
+    )
+  }
+
+  @Test
+  fun parse_unknownTotal() {
+    assertEquals(
+      ParsedContentRange(start = 500, end = 999, total = null),
+      parseContentRange("bytes 500-999/*"),
+    )
+  }
+
+  @Test
+  fun parse_malformed_returnsNull() {
+    assertNull(parseContentRange(null))
+    assertNull(parseContentRange("bytes -/"))
+    assertNull(parseContentRange("garbage"))
+    assertNull(parseContentRange("bytes 500-999"))
+    assertNull(parseContentRange("bytes abc-def/1000"))
+  }
+
+  // ---- decideResume: 206 ----
 
   @Test
   fun serverHonorsRange_resumes() {
@@ -34,22 +57,6 @@ class DownloadResumeDecisionTest {
         rangeRequested = true,
         contentRange = "bytes 500-999/1000",
         tmpFileSize = 500,
-        contentLength = 0,
-      ),
-    )
-  }
-
-  @Test
-  fun serverIgnoresRangeAndReturnsOk_restartsFromZero() {
-    // Regression: appending a full 200-response onto a partial file corrupts it.
-    assertEquals(
-      ResumeDecision.RESTART_FROM_ZERO,
-      decideResume(
-        responseCode = HttpURLConnection.HTTP_OK,
-        rangeRequested = true,
-        contentRange = null,
-        tmpFileSize = 3446,
-        contentLength = 1033814016,
       ),
     )
   }
@@ -64,24 +71,66 @@ class DownloadResumeDecisionTest {
         rangeRequested = true,
         contentRange = "bytes 589121629-1033814015/1033814016",
         tmpFileSize = 589113437,
-        contentLength = 0,
       ),
     )
   }
 
   @Test
-  fun tmpAlreadyComplete_returnsFinalize() {
+  fun partialWithoutStartOrEnd_restarts() {
     assertEquals(
-      ResumeDecision.FINALIZE,
+      ResumeDecision.RESTART_FROM_ZERO,
       decideResume(
         responseCode = HttpURLConnection.HTTP_PARTIAL,
         rangeRequested = true,
-        contentRange = "bytes 1000-999/1000",
-        tmpFileSize = 1000,
-        contentLength = 0,
+        contentRange = "bytes */1000",
+        tmpFileSize = 500,
       ),
     )
   }
+
+  @Test
+  fun partialMalformedContentRange_restarts() {
+    assertEquals(
+      ResumeDecision.RESTART_FROM_ZERO,
+      decideResume(
+        responseCode = HttpURLConnection.HTTP_PARTIAL,
+        rangeRequested = true,
+        contentRange = "garbage",
+        tmpFileSize = 500,
+      ),
+    )
+  }
+
+  // ---- decideResume: 200 ----
+
+  @Test
+  fun cleanStartWithEmptyTmp_resumesWithoutRestart() {
+    assertEquals(
+      ResumeDecision.RESUME,
+      decideResume(
+        responseCode = HttpURLConnection.HTTP_OK,
+        rangeRequested = false,
+        contentRange = null,
+        tmpFileSize = 0,
+      ),
+    )
+  }
+
+  @Test
+  fun serverIgnoresRangeAndReturnsOk_restartsFromZero() {
+    // Regression: appending a full 200-response onto a partial file corrupts it.
+    assertEquals(
+      ResumeDecision.RESTART_FROM_ZERO,
+      decideResume(
+        responseCode = HttpURLConnection.HTTP_OK,
+        rangeRequested = true,
+        contentRange = null,
+        tmpFileSize = 3446,
+      ),
+    )
+  }
+
+  // ---- decideResume: 416 ----
 
   @Test
   fun rangeNotSatisfiableWithCompleteTmp_finalizes() {
@@ -90,9 +139,8 @@ class DownloadResumeDecisionTest {
       decideResume(
         responseCode = 416,
         rangeRequested = true,
-        contentRange = "bytes 1000-999/1000",
+        contentRange = "bytes */1000",
         tmpFileSize = 1000,
-        contentLength = 0,
       ),
     )
   }
@@ -104,32 +152,63 @@ class DownloadResumeDecisionTest {
       decideResume(
         responseCode = 416,
         rangeRequested = true,
-        contentRange = "bytes 1000-999/1000",
+        contentRange = "bytes */1000",
         tmpFileSize = 500,
-        contentLength = 0,
       ),
     )
   }
 
   @Test
-  fun malformedContentRange_restartsFromZero() {
+  fun rangeNotSatisfiableWithoutContentRange_restarts() {
+    // Without a parseable `bytes */TOTAL` there is no proof the tmp file is complete;
+    // Content-Length is never substituted for the Content-Range total.
     assertEquals(
       ResumeDecision.RESTART_FROM_ZERO,
       decideResume(
-        responseCode = HttpURLConnection.HTTP_PARTIAL,
+        responseCode = 416,
+        rangeRequested = true,
+        contentRange = null,
+        tmpFileSize = 1000,
+      ),
+    )
+    assertEquals(
+      ResumeDecision.RESTART_FROM_ZERO,
+      decideResume(
+        responseCode = 416,
         rangeRequested = true,
         contentRange = "garbage",
-        tmpFileSize = 500,
-        contentLength = 0,
+        tmpFileSize = 1000,
       ),
     )
   }
 
   @Test
-  fun parseContentRangeHandlesValidAndInvalid() {
-    assertEquals(Pair(0L, 999L), parseContentRange("bytes 0-999/1000"))
-    assertEquals(Pair(589113437L, 1033814015L), parseContentRange("bytes 589113437-1033814015/1033814016"))
-    assertNull(parseContentRange(null))
-    assertNull(parseContentRange("bytes -/"))
+  fun fullRange416Format_isNotAThing_neverFinalizes() {
+    // The fake `bytes 1000-999/1000` shape must not be treated as a complete-range
+    // marker for 416: only `bytes */TOTAL` carries an unsatisfiable range.
+    assertEquals(
+      ResumeDecision.RESTART_FROM_ZERO,
+      decideResume(
+        responseCode = 416,
+        rangeRequested = true,
+        contentRange = "bytes 1000-999/1000",
+        tmpFileSize = 1000,
+      ),
+    )
+  }
+
+  // ---- decideResume: other codes ----
+
+  @Test
+  fun unexpectedResponseCode_restarts() {
+    assertEquals(
+      ResumeDecision.RESTART_FROM_ZERO,
+      decideResume(
+        responseCode = HttpURLConnection.HTTP_CREATED,
+        rangeRequested = false,
+        contentRange = null,
+        tmpFileSize = 0,
+      ),
+    )
   }
 }

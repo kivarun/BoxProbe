@@ -59,9 +59,8 @@ data class UrlAndFileName(val url: String, val fileName: String)
  *
  * @param responseCode HTTP response code for this attempt.
  * @param rangeRequested true when a `Range: bytes=<tmp>-` header was sent.
- * @param contentRange raw `Content-Range` header value, e.g. `bytes 100-999/1000` (may be null).
+ * @param contentRange raw `Content-Range` header value (may be null).
  * @param tmpFileSize size of the partial tmp file before this attempt started appending.
- * @param contentLength raw `Content-Length` header value for non-partial responses (may be null).
  */
 enum class ResumeDecision { RESUME, RESTART_FROM_ZERO, FINALIZE }
 
@@ -70,19 +69,16 @@ fun decideResume(
   rangeRequested: Boolean,
   contentRange: String?,
   tmpFileSize: Long,
-  contentLength: Long,
 ): ResumeDecision {
   when (responseCode) {
     HttpURLConnection.HTTP_PARTIAL -> {
       val parsed = parseContentRange(contentRange) ?: return ResumeDecision.RESTART_FROM_ZERO
-      val (startByte, endByte) = parsed
-      // The appended part must continue exactly at the end of the existing tmp file.
-      if (tmpFileSize != startByte) {
+      // A partial response must carry an explicit start/end and continue exactly at
+      // the end of the existing tmp file.
+      val startByte = parsed.start ?: return ResumeDecision.RESTART_FROM_ZERO
+      val endByte = parsed.end ?: return ResumeDecision.RESTART_FROM_ZERO
+      if (tmpFileSize != startByte || startByte > endByte) {
         return ResumeDecision.RESTART_FROM_ZERO
-      }
-      // Range fully satisfied already: nothing to write.
-      if (startByte > endByte) {
-        return ResumeDecision.FINALIZE
       }
       return ResumeDecision.RESUME
     }
@@ -94,10 +90,16 @@ fun decideResume(
       }
       return ResumeDecision.RESUME
     }
-    // Range Not Satisfiable: the tmp file may already contain the complete file.
+    // 416 Range Not Satisfiable — the real-world Content-Range is `bytes */TOTAL`.
+    // The tmp file may already contain the complete file; only the unsatisfied-range
+    // Content-Range total decides (Content-Length is never substituted for it, and a
+    // full-range shape on 416 is not a finalize marker).
     416 -> {
-      val total = parseContentRange(contentRange)?.second?.plus(1) ?: contentLength
-      if (total > 0 && tmpFileSize == total) {
+      val parsed = parseContentRange(contentRange) ?: return ResumeDecision.RESTART_FROM_ZERO
+      val total = parsed.total
+      if (parsed.start == null && parsed.end == null && total != null && total > 0 &&
+          tmpFileSize == total
+      ) {
         return ResumeDecision.FINALIZE
       }
       return ResumeDecision.RESTART_FROM_ZERO
@@ -106,20 +108,53 @@ fun decideResume(
   }
 }
 
-/** Parses `bytes S-E/T` into (S, E); returns null for malformed values. */
-fun parseContentRange(contentRange: String?): Pair<Long, Long>? {
+/**
+ * Parsed HTTP `Content-Range` header.
+ *
+ * Supported formats:
+ *  - `bytes 500-999/1000` (start, end, total)
+ *  - `bytes 500-999/*`    (start, end, unknown total)
+ *  - `bytes */1000`       (unsatisfiable range: 416, total only)
+ *
+ * Any other input parses to null.
+ */
+data class ParsedContentRange(
+  val start: Long?,
+  val end: Long?,
+  val total: Long?,
+)
+
+private val CONTENT_RANGE_FULL = Regex("^bytes (\\d+)-(\\d+)/(\\d+)$")
+private val CONTENT_RANGE_UNKNOWN_TOTAL = Regex("^bytes (\\d+)-(\\d+)/\\*$")
+private val CONTENT_RANGE_UNSATISFIED = Regex("^bytes \\*/(\\d+)$")
+
+fun parseContentRange(contentRange: String?): ParsedContentRange? {
   if (contentRange == null) {
     return null
   }
-  return try {
-    val rangeParts = contentRange.substringAfter("bytes ").split("/")
-    val byteRange = rangeParts[0].split("-")
-    val startByte = byteRange[0].toLong()
-    val endByte = byteRange[1].toLong()
-    Pair(startByte, endByte)
-  } catch (_: Exception) {
-    null
+  val value = contentRange.trim()
+  CONTENT_RANGE_FULL.matchEntire(value)?.let { match ->
+    return ParsedContentRange(
+      start = match.groupValues[1].toLong(),
+      end = match.groupValues[2].toLong(),
+      total = match.groupValues[3].toLong(),
+    )
   }
+  CONTENT_RANGE_UNKNOWN_TOTAL.matchEntire(value)?.let { match ->
+    return ParsedContentRange(
+      start = match.groupValues[1].toLong(),
+      end = match.groupValues[2].toLong(),
+      total = null,
+    )
+  }
+  CONTENT_RANGE_UNSATISFIED.matchEntire(value)?.let { match ->
+    return ParsedContentRange(
+      start = null,
+      end = null,
+      total = match.groupValues[1].toLong(),
+    )
+  }
+  return null
 }
 
 class DownloadWorker(context: Context, params: WorkerParameters) :
@@ -206,56 +241,88 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
             }
 
             try {
-            val resumeAttempt = outputTmpFile.length() > 0
+            var resumeAttempt = outputTmpFile.length() > 0
             if (resumeAttempt) {
               Log.d(
                 TAG,
                 "File '${outputTmpFile.name}' partial size: ${outputTmpFile.length()}. Trying to resume download",
               )
             }
-            val connection =
+            var connection =
               openDownloadConnection(
                 url = url,
                 accessToken = accessToken,
                 resumeFrom = if (resumeAttempt) outputTmpFile.length() else 0,
               )
             connection.connect()
-            val responseCode = connection.responseCode
+            var responseCode = connection.responseCode
             Log.d(TAG, "response code: $responseCode")
 
-            val decision =
+            var decision =
               decideResume(
                 responseCode = responseCode,
                 rangeRequested = resumeAttempt,
                 contentRange = connection.getHeaderField("Content-Range"),
                 tmpFileSize = if (resumeAttempt) outputTmpFile.length() else 0,
-                contentLength = connection.getHeaderField("Content-Length")?.toLongOrNull() ?: 0,
               )
             Log.d(TAG, "Resume decision: $decision")
 
-            val append =
-              when (decision) {
-                ResumeDecision.RESUME -> true
-                ResumeDecision.FINALIZE -> false
-                ResumeDecision.RESTART_FROM_ZERO -> {
-                  // Server ignored the Range request or the range start does not match
-                  // the tmp file: appending would produce a corrupted file.
-                  Log.d(TAG, "Restarting download from beginning: deleting tmp file.")
-                  outputTmpFile.delete()
-                  false
-                }
+            // A bad resume state (server ignored Range, mismatched range start,
+            // incomplete tmp on 416) must never reuse the old response body: close it
+            // and issue one clean non-range request, downloading from zero.
+            if (decision == ResumeDecision.RESTART_FROM_ZERO) {
+              connection.disconnect()
+              outputTmpFile.delete()
+              resumeAttempt = false
+              Log.d(TAG, "Clean restart from zero: issuing a fresh non-range request.")
+              connection =
+                openDownloadConnection(url = url, accessToken = accessToken, resumeFrom = 0)
+              connection.connect()
+              responseCode = connection.responseCode
+              Log.d(TAG, "restart response code: $responseCode")
+              decision =
+                decideResume(
+                  responseCode = responseCode,
+                  rangeRequested = false,
+                  contentRange = connection.getHeaderField("Content-Range"),
+                  tmpFileSize = 0,
+                )
+              if (decision == ResumeDecision.RESTART_FROM_ZERO) {
+                // At most one restart per attempt: a still-unacceptable response is a
+                // hard failure (WorkManager will retry from scratch).
+                throw IOException(
+                  "Download restart did not produce a usable response: HTTP $responseCode",
+                )
               }
+            }
 
             // Expected size for the final integrity check.
             val expectedTotalBytes =
               when (responseCode) {
                 HttpURLConnection.HTTP_PARTIAL ->
-                  parseContentRange(connection.getHeaderField("Content-Range"))?.second?.plus(1) ?: 0
+                  parseContentRange(connection.getHeaderField("Content-Range"))?.total ?: 0
                 HttpURLConnection.HTTP_OK ->
                   connection.getHeaderField("Content-Length")?.toLongOrNull() ?: 0
                 else -> 0
               }
 
+            val append = decision == ResumeDecision.RESUME && resumeAttempt
+
+            if (decision == ResumeDecision.FINALIZE) {
+              // 416 with an already-complete tmp file: the response body is the
+              // 416 error page and must never be read or written. Validate the
+              // tmp size against the Content-Range total, then fall through to the
+              // shared rename/post-download path.
+              connection.disconnect()
+              val total = parseContentRange(connection.getHeaderField("Content-Range"))?.total ?: 0
+              if (total <= 0 || outputTmpFile.length() != total) {
+                throw IOException(
+                  "416 finalize rejected: tmp size ${outputTmpFile.length()} != Content-Range total $total",
+                )
+              }
+              Log.d(TAG, "Finalize from 416: tmp file complete (${outputTmpFile.length()} bytes).")
+              downloadedBytes += outputTmpFile.length()
+            } else {
             val inputStream = connection.inputStream
             val outputStream = FileOutputStream(outputTmpFile, append)
 
@@ -324,6 +391,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
               Log.e(TAG, msg)
               outputTmpFile.delete()
               throw IOException(msg)
+            }
             }
 
             // Rename the tmp file to the original file name by removing the tmp file ext.
