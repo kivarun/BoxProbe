@@ -157,6 +157,25 @@ fun parseContentRange(contentRange: String?): ParsedContentRange? {
   return null
 }
 
+/** Stable sidecar lock file for one download tmp file: same inode for the whole attempt. */
+const val DOWNLOAD_LOCK_FILE_SUFFIX = ".lock"
+
+fun downloadLockFileFor(tmpFile: File): File =
+  File(tmpFile.parentFile, tmpFile.name + DOWNLOAD_LOCK_FILE_SUFFIX)
+
+/**
+ * Whether the tmp file may be finalized directly from a 416 response. The decision
+ * uses the Content-Range parsed BEFORE disconnect: an unsatisfied range with a known
+ * positive total that exactly matches the tmp size is required.
+ */
+fun finalizeSizeAccepted(parsedContentRange: ParsedContentRange?, tmpFileSize: Long): Boolean {
+  val total = parsedContentRange?.total ?: return false
+  return parsedContentRange.start == null &&
+    parsedContentRange.end == null &&
+    total > 0 &&
+    tmpFileSize == total
+}
+
 class DownloadWorker(context: Context, params: WorkerParameters) :
   CoroutineWorker(context, params) {
   private val externalFilesDir = context.getExternalFilesDir(null)
@@ -227,13 +246,24 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
                   .joinToString(separator = File.separator),
               )
 
-            // Claim exclusive write access to the tmp file. WorkManager retries and
-            // REPLACE-policy re-enqueues can start a new worker while a previous
-            // (canceled-but-draining) instance still writes to the same tmp file;
-            // two concurrent append streams produce a corrupted file.
-            val lockChannel =
-              java.io.RandomAccessFile(outputTmpFile, "rw").channel
-            val fileLock = lockChannel.tryLock()
+            // Claim exclusive write access via a stable sidecar lock file. The lock
+            // lives on its own inode for the whole attempt, so the tmp file can be
+            // inspected, deleted, recreated (restart-from-zero) and renamed while the
+            // lock stays valid — locking the tmp file itself would break on its first
+            // delete+recreate. WorkManager retries and REPLACE-policy re-enqueues can
+            // start a new worker while a previous (canceled-but-draining) instance
+            // still writes to the same tmp file; two concurrent append streams
+            // produce a corrupted file.
+            val lockFile = downloadLockFileFor(outputTmpFile)
+            val lockChannel = java.io.RandomAccessFile(lockFile, "rw").channel
+            val fileLock =
+              try {
+                lockChannel.tryLock()
+              } catch (_: java.nio.channels.OverlappingFileLockException) {
+                // Same-process double-lock surfaces as an exception, not as null;
+                // it means another worker of this app still holds the lock.
+                null
+              }
             if (fileLock == null) {
               Log.w(TAG, "Tmp file '${outputTmpFile.name}' is locked by another download writer.")
               lockChannel.close()
@@ -258,11 +288,16 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
             var responseCode = connection.responseCode
             Log.d(TAG, "response code: $responseCode")
 
+            // Read and parse the response headers once; the parsed values stay valid
+            // after disconnect (never read connection metadata post-disconnect).
+            val contentRangeHeader = connection.getHeaderField("Content-Range")
+            var parsedContentRange = parseContentRange(contentRangeHeader)
+
             var decision =
               decideResume(
                 responseCode = responseCode,
                 rangeRequested = resumeAttempt,
-                contentRange = connection.getHeaderField("Content-Range"),
+                contentRange = contentRangeHeader,
                 tmpFileSize = if (resumeAttempt) outputTmpFile.length() else 0,
               )
             Log.d(TAG, "Resume decision: $decision")
@@ -280,11 +315,14 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
               connection.connect()
               responseCode = connection.responseCode
               Log.d(TAG, "restart response code: $responseCode")
+              contentRangeHeader.let { /* stale from the previous response; refresh below */ }
+              val restartContentRangeHeader = connection.getHeaderField("Content-Range")
+              parsedContentRange = parseContentRange(restartContentRangeHeader)
               decision =
                 decideResume(
                   responseCode = responseCode,
                   rangeRequested = false,
-                  contentRange = connection.getHeaderField("Content-Range"),
+                  contentRange = restartContentRangeHeader,
                   tmpFileSize = 0,
                 )
               if (decision == ResumeDecision.RESTART_FROM_ZERO) {
@@ -299,8 +337,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
             // Expected size for the final integrity check.
             val expectedTotalBytes =
               when (responseCode) {
-                HttpURLConnection.HTTP_PARTIAL ->
-                  parseContentRange(connection.getHeaderField("Content-Range"))?.total ?: 0
+                HttpURLConnection.HTTP_PARTIAL -> parsedContentRange?.total ?: 0
                 HttpURLConnection.HTTP_OK ->
                   connection.getHeaderField("Content-Length")?.toLongOrNull() ?: 0
                 else -> 0
@@ -310,12 +347,12 @@ class DownloadWorker(context: Context, params: WorkerParameters) :
 
             if (decision == ResumeDecision.FINALIZE) {
               // 416 with an already-complete tmp file: the response body is the
-              // 416 error page and must never be read or written. Validate the
-              // tmp size against the Content-Range total, then fall through to the
-              // shared rename/post-download path.
+              // 416 error page and must never be read or written. The Content-Range
+              // was parsed before disconnect; validate against it, then fall through
+              // to the shared rename/post-download path.
               connection.disconnect()
-              val total = parseContentRange(connection.getHeaderField("Content-Range"))?.total ?: 0
-              if (total <= 0 || outputTmpFile.length() != total) {
+              if (!finalizeSizeAccepted(parsedContentRange, outputTmpFile.length())) {
+                val total = parsedContentRange?.total ?: 0
                 throw IOException(
                   "416 finalize rejected: tmp size ${outputTmpFile.length()} != Content-Range total $total",
                 )
