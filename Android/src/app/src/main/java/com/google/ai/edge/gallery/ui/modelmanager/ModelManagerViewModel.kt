@@ -1088,6 +1088,12 @@ constructor(
     }
 
     // Load imported models.
+    //
+    // Add them to the same built-in task objects this function returns
+    // (`tasks`). Do NOT use getTasksByIds() here: on process start
+    // uiState.value.tasks is still the empty placeholder from
+    // createEmptyUiState(), so restored imports would be added to zero
+    // tasks and lost from the emitted state.
     for (importedModel in dataStoreRepository.readImportedModels()) {
       Log.d(TAG, "stored imported model: $importedModel")
 
@@ -1095,14 +1101,20 @@ constructor(
       val model = createModelFromImportedModelInfo(info = importedModel)
 
       // Add to task.
-      for (task in getTasksByIds(ids = setOf(BuiltInTaskId.LLM_CHAT, BuiltInTaskId.LLM_PROMPT_LAB))) {
-        task.models.add(model)
-      }
-      if (model.llmSupportImage) {
-        getTasksByIds(ids = setOf(BuiltInTaskId.LLM_ASK_IMAGE)).forEach { it.models.add(model) }
-      }
-      if (model.llmSupportAudio) {
-        getTasksByIds(ids = setOf(BuiltInTaskId.LLM_ASK_AUDIO)).forEach { it.models.add(model) }
+      for (task in tasks) {
+        if (
+          task.id != BuiltInTaskId.LLM_CHAT &&
+            task.id != BuiltInTaskId.LLM_PROMPT_LAB &&
+            !(task.id == BuiltInTaskId.LLM_ASK_IMAGE && model.llmSupportImage) &&
+            !(task.id == BuiltInTaskId.LLM_ASK_AUDIO && model.llmSupportAudio)
+        ) {
+          continue
+        }
+        // Guard against duplicates when createUiState() runs more than once
+        // (e.g. activity recreation).
+        if (task.models.none { it.name == model.name && it.imported }) {
+          task.models.add(model)
+        }
       }
 
       // Update status.
