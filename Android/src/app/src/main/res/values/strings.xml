@@ -124,6 +124,7 @@
   <string name="max_tokens_warning_message" translatable="false">Setting max tokens above 10000 may cause app to be unstable.</string>
   <string name="model_is_initializing_msg" translatable="false">Initializing model…</string>
   <string name="model_list_imported_models_title" translatable="false">Imported models</string>
+  <string name="model_imported_badge" translatable="false">Imported</string>
   <plurals name="model_list_number_of_models_available" translatable="false">
     <item quantity="one">%d model available</item>
     <item quantity="other">%d models available</item>

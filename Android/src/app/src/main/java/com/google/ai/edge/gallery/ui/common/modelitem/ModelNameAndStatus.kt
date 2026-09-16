@@ -106,6 +106,17 @@ fun ModelNameAndStatus(
       modifier = Modifier.padding(end = 64.dp),
     )
 
+    // "Imported" marker so imported cards are unmistakable next to built-in cards with
+    // near-identical names.
+    if (model.imported) {
+      Text(
+        stringResource(R.string.model_imported_badge),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp, end = 64.dp),
+      )
+    }
+
     // Status icon + size + download progress details.
     if (model.runtimeType != RuntimeType.AICORE) {
       Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {

@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.automirrored.rounded.ListAlt
@@ -99,6 +100,18 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "AGGlobalMM"
 
+/**
+ * Computes the LazyColumn item index of a newly imported model card.
+ *
+ * The list layout is: 1 promo item, [builtInCount] built-in model items, then — only when
+ * there are imported models — 1 "Imported models" label item followed by the imported
+ * model items. Returns null when [importedIndex] is out of range.
+ */
+fun importedModelListItemIndex(builtInCount: Int, importedIndex: Int): Int? {
+  if (importedIndex < 0) return null
+  return builtInCount + 2 + importedIndex
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlobalModelManager(
@@ -124,6 +137,8 @@ fun GlobalModelManager(
   val context = LocalContext.current
   val snackbarHostState = remember { SnackbarHostState() }
   val modelItemExpandedStates = remember { mutableStateMapOf<String, Boolean>() }
+  val lazyListState = rememberLazyListState()
+  var lastImportedFileName by remember { mutableStateOf<String?>(null) }
 
   val promoId = "gm4_banner"
   var showPromo by remember { mutableStateOf(false) }
@@ -172,6 +187,18 @@ fun GlobalModelManager(
     builtInModels.addAll(sortedModels.filter { !it.imported })
     importedModels.clear()
     importedModels.addAll(sortedModels.filter { it.imported })
+
+    // Scroll to the just-imported model card so the user sees exactly what was imported
+    // instead of the expanded built-in cards at the top of the list.
+    val importedName = lastImportedFileName
+    if (importedName != null) {
+      val importedIndex = importedModels.indexOfFirst { it.name == importedName }
+      val listItemIndex = importedModelListItemIndex(builtInModels.size, importedIndex)
+      if (listItemIndex != null) {
+        lazyListState.animateScrollToItem(index = listItemIndex)
+      }
+      lastImportedFileName = null
+    }
   }
 
   // Handle system's edge swipe.
@@ -230,6 +257,7 @@ fun GlobalModelManager(
   ) { innerPadding ->
     Box() {
       LazyColumn(
+        state = lazyListState,
         modifier =
           Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
             .fillMaxWidth()
@@ -386,6 +414,7 @@ fun GlobalModelManager(
           info = info,
           onDismiss = { showImportingDialog = false },
           onDone = {
+            lastImportedFileName = it.fileName
             viewModel.addImportedLlmModel(info = it)
             showImportingDialog = false
 
