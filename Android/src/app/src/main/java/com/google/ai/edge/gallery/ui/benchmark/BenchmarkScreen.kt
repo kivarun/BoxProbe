@@ -275,6 +275,16 @@ fun BenchmarkScreen(
       )
     }
 
+    // Stop surface: a Stop-requested benchmark finished early and is not persisted.
+    if (uiState.stopMessage.isNotEmpty()) {
+      Text(
+        text = uiState.stopMessage,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+      )
+    }
+
     // Delegate guard: an NPU-marked benchmark without DispatchDelegate evidence must
     // never be readable as an NPU performance result. Unvalidated NPU results are not
     // persisted, so the marker is shown for the (transient) attempt itself.

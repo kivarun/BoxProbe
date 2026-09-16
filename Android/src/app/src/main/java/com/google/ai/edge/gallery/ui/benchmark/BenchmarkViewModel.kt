@@ -111,6 +111,10 @@ data class BenchmarkUiState(
   val completedRunCount: Int = 0,
   /** Set when a run failed with a runtime error; surfaces the error without crashing. */
   val runError: String = "",
+  /** Set when the user asked to stop the current benchmark invocation. */
+  val stopRequested: Boolean = false,
+  /** Set when the benchmark finished early because of a Stop request. */
+  val stopMessage: String = "",
   /** Accelerator string of the last benchmark invocation ("cpu"/"gpu"/"npu"). */
   val lastAccelerator: String = "",
   /** Delegate verdict captured from the partitioning logs of the last benchmark run. */
@@ -118,6 +122,18 @@ data class BenchmarkUiState(
   /** Whether the last NPU run produced delegation evidence (DispatchDelegate). */
   val npuValidated: Boolean = false,
 )
+
+/** Marks the stop request on a running benchmark; a no-op when nothing is running. */
+fun BenchmarkUiState.withStopRequested(): BenchmarkUiState =
+  if (running) copy(stopRequested = true) else this
+
+/**
+ * Whether the next benchmark run may start. Stop is honored between runs: the
+ * native `litertlm.benchmark` call is blocking JNI and cannot be cancelled
+ * mid-run, so the current run always finishes.
+ */
+fun shouldStartNextBenchmarkRun(stopRequested: Boolean, completedRuns: Int, runCount: Int): Boolean =
+  !stopRequested && completedRuns < runCount
 
 @HiltViewModel
 class BenchmarkViewModel
@@ -153,6 +169,8 @@ constructor(
       setRunProgress(completedRunCount = 0)
       setTotalRunCount(totalRunCount = runCount)
       setShowResultsViewer(showResultsViewer = true)
+      // A previous Stop request must not affect this invocation.
+      _uiState.update { it.copy(stopRequested = false, stopMessage = "") }
 
       val parts: List<String> =
         listOf(
@@ -191,7 +209,12 @@ constructor(
           else -> Backend.CPU()
         }
       val modelPath = model.getPath(context = appContext)
+      var completedRuns = 0
       for (i in 0 until runCount) {
+        if (!shouldStartNextBenchmarkRun(_uiState.value.stopRequested, completedRuns, runCount)) {
+          Log.d(TAG, "Stop requested: not starting run #$i")
+          break
+        }
         Log.d(TAG, "Start running #$i...")
         val benchmarkInfo =
           benchmark(
@@ -214,9 +237,17 @@ constructor(
         timesToFirstToken.add(benchmarkInfo.timeToFirstTokenInSecond)
 
         // Mark finish for this run.
-        setRunProgress(completedRunCount = i + 1)
+        completedRuns = i + 1
+        setRunProgress(completedRunCount = completedRuns)
       }
+      val stopped = completedRuns < runCount
+      val allRunsCompleted = completedRuns == runCount
       val endMs = System.currentTimeMillis()
+      if (stopped) {
+        val msg = "Benchmark stopped after $completedRuns of $runCount runs — not saved"
+        Log.d(TAG, msg)
+        _uiState.update { it.copy(stopMessage = msg) }
+      }
 
       // Delegate evidence must exist BEFORE any persistence decision: an NPU-marked
       // benchmark whose partitioning logs do not prove DispatchDelegate delegation
@@ -260,7 +291,15 @@ constructor(
             LlmBenchmarkResult.newBuilder().setBaiscInfo(basicInfo).setStats(stats).build()
           )
           .build()
-      if (shouldPersistBenchmark(accelerator, delegateVerdict, benchmarkSucceeded = true)) {
+      if (
+        shouldPersistBenchmark(
+          accelerator,
+          delegateVerdict,
+          // A Stop-requested invocation did not complete the requested run count:
+          // partial numbers must not enter the benchmark history.
+          benchmarkSucceeded = allRunsCompleted,
+        )
+      ) {
         val newId = addBenchmarkResult(result = result)
         collapseAll()
         setExpanded(id = newId, expanded = true)
@@ -292,6 +331,15 @@ constructor(
   /** Kept for structural symmetry with other setters; error state is cleared per run. */
   fun setRunError(error: String) {
     _uiState.update { _uiState.value.copy(runError = error) }
+  }
+
+  /**
+   * User Stop request for the running benchmark. The current native `benchmark()`
+   * invocation is blocking JNI and always finishes; no further run is started and
+   * the partial invocation is not persisted.
+   */
+  fun stopBenchmark() {
+    _uiState.update { it.withStopRequested() }
   }
 
   fun setShowResultsViewer(showResultsViewer: Boolean) {

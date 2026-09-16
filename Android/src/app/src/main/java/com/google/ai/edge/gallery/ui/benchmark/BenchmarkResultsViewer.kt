@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.UnfoldLessDouble
 import androidx.compose.material.icons.rounded.UnfoldMoreDouble
@@ -268,6 +269,16 @@ fun BenchmarkResultsViewer(
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                   style = MaterialTheme.typography.labelLarge,
                 )
+                // Stop benchmark: honored between runs; the in-flight native
+                // benchmark() call always finishes first.
+                Button(
+                  onClick = { viewModel.stopBenchmark() },
+                  enabled = !uiState.stopRequested,
+                ) {
+                  Icon(Icons.Rounded.Stop, contentDescription = null)
+                  Spacer(modifier = Modifier.width(4.dp))
+                  Text(stringResource(R.string.stop_benchmark))
+                }
               }
             }
           }

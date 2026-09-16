@@ -157,6 +157,8 @@
   <string name="run_benchmark" translatable="false">Run benchmark</string>
   <string name="run_benchmark_confirmation_msg" translatable="false">This process typically takes several minutes and cannot be interrupted once started. Would you like to proceed?</string>
   <string name="running_benchmark_msg" translatable="false">Running model benchmark...</string>
+  <string name="stop_benchmark" translatable="false">Stop benchmark</string>
+  <string name="benchmark_stopped_msg" translatable="false">Benchmark stopped after %1$d of %2$d runs — not saved</string>
   <string name="save" translatable="false">Save</string>
   <string name="secret" translatable="false">Secret</string>
   <string name="select_downloaded_model" translatable="false">Select a downloaded model</string>
