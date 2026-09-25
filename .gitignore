@@ -1,2 +1,5 @@
 # Local build scratch produced by the LiteRT-MediaTek build tooling.
 /.litert-mt/
+
+# Iteration-2 experiment scratch (UAT tooling, logs, diagnostics)
+/a5/
